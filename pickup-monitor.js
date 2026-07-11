@@ -129,27 +129,38 @@ async function run() {
     data.names.length !== last.names.length ||
     data.names.some(n => !last.names.includes(n));
 
-  if (isPeriodChanged || isNamesChanged) {
-    console.log("change detected, sending LINE...");
+	if (isPeriodChanged || isNamesChanged) {
+	  console.log("change detected, sending LINE...");
 
-    const msg =
-      `【ピックアップ奥様更新】\n` +
-      `${data.period}\n` +
-      `${data.names.join('\n')}`;
+	  const msg =
+	    `【ピックアップ奥様更新】\n` +
+	    `${data.period}\n` +
+	    `${data.names.join('\n')}`;
 
-    try {
-      await sendLine(msg);
-    } catch (e) {
-      console.log("LINE送信エラー:", e.message);
-      // ★★★ 送信失敗しても last.json は更新する ★★★
-    }
+	  await sendLine(msg);
 
-    saveLast(saveFile, data.period, data.names, getJSTTime());
+	  const saveData = {
+	    period: data.period,
+	    names: data.names,
+	    lastNoticeTime: getJSTTime()
+	  };
 
-  } else {
-    console.log("no change");
-    saveLast(saveFile, data.period, data.names, last.lastNoticeTime);
-  }
+	  console.log("【DEBUG】pickup-last.json に書き込みます:", saveFile, saveData);
+	  fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+	  console.log("【DEBUG】pickup-last.json 書き込み完了");
+	} else {
+	  console.log("no change");
+
+	  const saveData = {
+	    period: data.period,
+	    names: data.names,
+	    lastNoticeTime: last.lastNoticeTime
+	  };
+
+	  console.log("【DEBUG】pickup-last.json に書き込みます(no change):", saveFile, saveData);
+	  fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+	  console.log("【DEBUG】pickup-last.json 書き込み完了(no change)");
+	}
 
   return 'done';
 }
