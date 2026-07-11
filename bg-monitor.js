@@ -12,8 +12,7 @@ const KEYWORDS = ["キャンセル発生", "急遽出勤", "出勤延長"];
    JST固定の時刻
 =============================== */
 function getJSTTime() {
-  const date = new Date();
-  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const jst = new Date(); 
 
   const yyyy = jst.getFullYear();
   const mm = String(jst.getMonth() + 1).padStart(2, "0");

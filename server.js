@@ -108,32 +108,85 @@ app.get("/dashboard", (req, res) => {
     <p>最終更新: ${getJSTTime()}</p>
 
     <div class="box">
-      <h2>pickup-monitor</h2>
+      <h2>アバンチュール-ピックアップ奥様</h2>
       <p>期間: ${pickup.period || "-"}</p>
       <p>奥様: ${pickup.names?.join(", ") || "-"}</p>
       <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
     </div>
 
+	<div class="box">
+	  <h2>アバンチュール-オキニ出勤情報</h2>
+
+	  <style>
+		.heaven-grid {
+		  display: flex;
+		  gap: 20px;
+		  flex-wrap: wrap;
+		}
+
+		.heaven-col {
+		  flex: none;        /* ← これが重要 */
+		  width: auto;       /* ← 中身に合わせる */
+		  background: #333;
+		  padding: 10px;
+		  border-radius: 6px;
+		}
+	    .heaven-col h3 {
+	      margin-top: 0;
+	      color: #fff;
+	    }
+	 	  .heaven-row {
+	 	    padding: 4px 0;
+	 	    border-bottom: 1px solid #444;
+	 	    font-size: 14px;
+	 	  }
+  	  </style>
+
+	  <div class="heaven-grid">
+	    ${heavenData.map(h => {
+	      const schedule = h.data.schedule || h.data;
+
+	      // 出勤が入っている最後の日を探す
+	      let lastWorkIndex = -1;
+	      if (Array.isArray(schedule)) {
+	        schedule.forEach((item, idx) => {
+	          if (item.time && item.time !== "_" && item.time !== "-") {
+	            lastWorkIndex = idx;
+	          }
+	        });
+	      }
+
+	      // 表示する範囲を決定（出勤がある日まで）
+	      const visibleSchedule =
+	        lastWorkIndex >= 0 ? schedule.slice(0, lastWorkIndex + 1) : schedule;
+
+			const rows = Array.isArray(visibleSchedule)
+			  ? visibleSchedule.map(item => {
+			      const time = (item.time === "_" || item.time === "-") ? "-" : item.time;
+			      return `<div class="heaven-row">${item.date} ${time}</div>`;
+			    }).join("")
+			  : "<div>データなし</div>";
+
+	      return `
+	        <div class="heaven-col">
+	          <h3>${h.name}</h3>
+	          ${rows}
+	          <p>最終通知: ${h.data.lastNoticeTime || "-"}</p>
+	        </div>
+	      `;
+	    }).join("")}
+	  </div>
+	</div>
+
     <div class="box">
-      <h2>bg-monitor</h2>
+      <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
       <pre>${bgNotice.lastNotice || "-"}</pre>
     </div>
 
     <div class="box">
-      <h2>heaven-monitor</h2>
-      ${heavenData.map(h => `
-        <div class="cast-box">
-          <h3>${h.name}</h3>
-          <pre>${JSON.stringify(h.data.schedule || h.data, null, 2)}</pre>
-          <p>最終通知: ${h.data.lastNoticeTime || "-"}</p>
-        </div>
-      `).join("")}
-    </div>
-
-    <div class="box">
-      <h2>yuuri-monitor</h2>
+      <h2>ゆうりちゃんの日記</h2>
       <p>タイトル: ${yuuri.title || "-"}</p>
       <p>URL: ${yuuri.link || "-"}</p>
       <p>最終通知: ${yuuri.lastNoticeTime || "-"}</p>
@@ -154,6 +207,20 @@ function safeLoad(filename) {
   } catch {
     return {};
   }
+}
+
+function getJSTTime() {
+  const jst = new Date();
+
+  const yyyy = jst.getFullYear();
+  const mm = String(jst.getMonth() + 1).padStart(2, "0");
+  const dd = String(jst.getDate()).padStart(2, "0");
+
+  const hh = String(jst.getHours()).padStart(2, "0");
+  const mi = String(jst.getMinutes()).padStart(2, "0");
+  const ss = String(jst.getSeconds()).padStart(2, "0");
+
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
 
 // WebService 起動
