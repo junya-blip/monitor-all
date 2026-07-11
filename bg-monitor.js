@@ -9,7 +9,7 @@ const USER_ID = process.env.LINE_USER_ID;
 const KEYWORDS = ["キャンセル発生", "急遽出勤", "出勤延長"];
 
 /* ===============================
-   JST固定の時刻を返す関数
+   JST固定の時刻
 =============================== */
 function getJSTTime() {
   const date = new Date();
@@ -27,14 +27,13 @@ function getJSTTime() {
 }
 
 /* ===============================
-   config.json 読み込み（統合版）
+   config.json 読み込み
 =============================== */
 function loadConfig() {
   try {
     const raw = fs.readFileSync(path.join(__dirname, "config.json"), "utf-8");
     return JSON.parse(raw);
-  } catch (err) {
-    console.error("config.json の読み込みに失敗:", err);
+  } catch {
     return { castFilterEnabled: false, castNames: [] };
   }
 }
@@ -52,19 +51,33 @@ function containsCastName(title) {
    正規化（強化版）
 =============================== */
 function normalize(text) {
-  return text
+  return (text || "")
     .replace(/\s+/g, "")
     .replace(/　+/g, "")
     .trim();
 }
 
+/* ===============================
+   ヒットの正規化（差分判定強化）
+=============================== */
+function normalizeHit(hit) {
+  return {
+    title: normalize(hit.title),
+    keyword: normalize(hit.keyword),
+    shift: normalize(hit.shift),
+    date: normalize(hit.date),
+    url: normalize(hit.url)
+  };
+}
+
+/* ===============================
+   重複排除
+=============================== */
 function uniqueHits(hits) {
   const map = new Map();
   for (const h of hits) {
-    const key = `${h.title}-${h.keyword}-${h.shift}-${h.date}-${h.url}`;
-    if (!map.has(key)) {
-      map.set(key, h);
-    }
+    const key = JSON.stringify(normalizeHit(h));
+    if (!map.has(key)) map.set(key, h);
   }
   return Array.from(map.values());
 }
@@ -120,7 +133,7 @@ function buildUrls() {
 }
 
 /* ===============================
-   ページ解析（完全修正版）
+   ページ解析
 =============================== */
 async function checkPage(url) {
   const res = await axios.get(url);
@@ -159,25 +172,20 @@ async function checkPage(url) {
       $(td).find(".time").text().trim() ||
       $(td).find("span").text().trim();
 
-    const img = $(td).find("img.thum").attr("src") || "";
-    const imgUrl = img.startsWith("/")
-      ? `https://www.kobe-b1.com${img}`
-      : img;
-
     const parts = url.split("/");
     const year = parts.at(-3);
     const month = parts.at(-2);
     const day = parts.at(-1);
     const date = `${year}/${month}/${day}`;
 
-    hits.push({ title, keyword, shift, date, url, imgUrl });
+    hits.push({ title, keyword, shift, date, url });
   });
 
   return hits;
 }
 
 /* ===============================
-   last.json 読み書き（統合フォルダ用）
+   last.json 読み書き
 =============================== */
 function loadLast() {
   const file = path.join(__dirname, "data", "bg-last.json");
@@ -194,7 +202,7 @@ function saveLast(data) {
 }
 
 /* ===============================
-   lastNotice.json（統合フォルダ用）
+   lastNotice.json
 =============================== */
 function saveLastNotice(text) {
   const file = path.join(__dirname, "data", "bg-lastNotice.json");
@@ -208,7 +216,7 @@ function saveLastNotice(text) {
 }
 
 /* ===============================
-   メイン処理（Cron Job 用）
+   メイン処理（WebService用）
 =============================== */
 async function main() {
   console.log("bg-monitor 開始:", getJSTTime());
@@ -229,68 +237,55 @@ async function main() {
 
   const lastHits = loadLast();
 
+  // 差分判定（正規化して比較）
   const diff = allHits.filter(
     hit => !lastHits.some(
       last =>
-        last.title === hit.title &&
-        last.keyword === hit.keyword &&
-        last.shift === hit.shift &&
-        last.date === hit.date &&
-        last.url === hit.url
+        JSON.stringify(normalizeHit(last)) === JSON.stringify(normalizeHit(hit))
     )
   );
 
-	if (diff.length === 0) {
-	  console.log("差分なし → 通知なし");
-	} else {
-	  // 差分あり
-	  let notified = false;
+  if (diff.length === 0) {
+    console.log("差分なし → 通知なし");
+  } else {
+    let notified = false;
 
-	  for (const hit of diff) {
-	    if (config.castFilterEnabled) {
-	      if (containsCastName(hit.title)) {
-	        console.log("差分あり → 通知開始（キャスト一致）");
-	        await sendLine(hit);
+    for (const hit of diff) {
+      if (config.castFilterEnabled) {
+        if (containsCastName(hit.title)) {
+          await sendLine(hit);
 
-	        const noticeText = [
-	          hit.date,
-	          hit.title,
-	          hit.keyword,
-	          hit.shift,
-	          hit.url
-	        ].join("\n");
+          const noticeText = [
+            hit.date,
+            hit.title,
+            hit.keyword,
+            hit.shift,
+            hit.url
+          ].join("\n");
 
-	        saveLastNotice(noticeText);
-	        notified = true;
-	      } else {
-	        console.log(`差分あり → キャスト不一致（${hit.title}）`);
-	        // 通知しない
-	        // bg-last.json も更新しない
-	      }
-	    } else {
-	      console.log("差分あり → 通知開始（フィルターOFF）");
-	      await sendLine(hit);
+          saveLastNotice(noticeText);
+          notified = true;
+        }
+      } else {
+        await sendLine(hit);
 
-	      const noticeText = [
-	        hit.date,
-	        hit.title,
-	        hit.keyword,
-	        hit.shift,
-	        hit.url
-	      ].join("\n");
+        const noticeText = [
+          hit.date,
+          hit.title,
+          hit.keyword,
+          hit.shift,
+          hit.url
+        ].join("\n");
 
-	      saveLastNotice(noticeText);
-	      notified = true;
-	    }
-	  }
+        saveLastNotice(noticeText);
+        notified = true;
+      }
+    }
 
-	  // LINE通知が実際に送られた場合のみ last を更新
-	  if (notified) {
-	    saveLast(allHits);
-	  } else {
-	    console.log("通知対象キャストが存在しないため、last.json は更新しません");
-	  }
-	}
+    if (notified) {
+      saveLast(allHits);
+    }
+  }
 
   console.log("bg-monitor 完了:", getJSTTime());
 }
