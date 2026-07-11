@@ -7,7 +7,7 @@ const TOKEN = process.env.LINE_TOKEN;
 const USER_ID = process.env.LINE_USER_ID;
 
 /* ===============================
-   JST固定の時刻を返す関数
+   JST固定の時刻
 =============================== */
 function getJSTTime() {
   const date = new Date();
@@ -22,6 +22,16 @@ function getJSTTime() {
   const ss = String(jst.getSeconds()).padStart(2, "0");
 
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+/* ===============================
+   正規化（揺れ対策）
+=============================== */
+function normalize(text) {
+  return (text || "")
+    .replace(/\s+/g, "")
+    .replace(/　+/g, "")
+    .trim();
 }
 
 /* ===============================
@@ -46,7 +56,7 @@ async function getLatestPost() {
 }
 
 /* ===============================
-   last.json 読み書き（統合フォルダ用）
+   last.json 読み書き
 =============================== */
 function loadLast() {
   const file = path.join(__dirname, "data", "yuuri-last.json");
@@ -70,10 +80,20 @@ function saveLast(data) {
 }
 
 /* ===============================
-   差分判定
+   差分判定（強化版）
 =============================== */
 function isDifferent(a, b) {
-  return a.title !== b.title || a.link !== b.link;
+  const aNorm = {
+    title: normalize(a.title),
+    link: normalize(a.link)
+  };
+
+  const bNorm = {
+    title: normalize(b.title),
+    link: normalize(b.link)
+  };
+
+  return JSON.stringify(aNorm) !== JSON.stringify(bNorm);
 }
 
 /* ===============================
@@ -110,9 +130,9 @@ async function sendLine(post) {
 }
 
 /* ===============================
-   メイン処理（Cron Job 用）
+   メイン処理（WebService用）
 =============================== */
-async function main() {
+module.exports = async function () {
   console.log("yuuri-monitor 開始:", getJSTTime());
 
   const latest = await getLatestPost();
@@ -140,6 +160,4 @@ async function main() {
   }
 
   console.log("yuuri-monitor 完了:", getJSTTime());
-}
-
-module.exports = main;
+};

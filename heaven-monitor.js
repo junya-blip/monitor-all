@@ -7,35 +7,43 @@ const casts = JSON.parse(fs.readFileSync(path.join(__dirname, "cast.json"), "utf
 const TOKEN = process.env.LINE_TOKEN;
 const USER_ID = process.env.LINE_USER_ID;
 
-/* ★★★★★ JST固定の時刻を返す関数（ズレない） ★★★★★ */
+/* ===============================
+   JST固定の時刻
+=============================== */
 function getJSTTime() {
   const date = new Date();
-  const jst = new Date(date.getTime() + (9 * 60 * 60 * 1000)); // UTC → JST
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
 
   const yyyy = jst.getFullYear();
-  const mm = String(jst.getMonth() + 1).padStart(2, '0');
-  const dd = String(jst.getDate()).padStart(2, '0');
+  const mm = String(jst.getMonth() + 1).padStart(2, "0");
+  const dd = String(jst.getDate()).padStart(2, "0");
 
-  const hh = String(jst.getHours()).padStart(2, '0');
-  const mi = String(jst.getMinutes()).padStart(2, '0');
-  const ss = String(jst.getSeconds()).padStart(2, '0');
+  const hh = String(jst.getHours()).padStart(2, "0");
+  const mi = String(jst.getMinutes()).padStart(2, "0");
+  const ss = String(jst.getSeconds()).padStart(2, "0");
 
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
-/* ★★★★★ ここまで ★★★★★ */
 
-// LINE Messaging API
+/* ===============================
+   正規化（揺れ対策）
+=============================== */
+function normalize(text) {
+  return (text || "")
+    .replace(/\s+/g, "")
+    .replace(/　+/g, "")
+    .trim();
+}
+
+/* ===============================
+   LINE通知
+=============================== */
 async function sendLine(message) {
   await axios.post(
     "https://api.line.me/v2/bot/message/push",
     {
       to: USER_ID,
-      messages: [
-        {
-          type: "text",
-          text: message
-        }
-      ]
+      messages: [{ type: "text", text: message }]
     },
     {
       headers: {
@@ -46,23 +54,30 @@ async function sendLine(message) {
   );
 }
 
-// ★ 出勤予定を整形する関数（行頭★対応）
+/* ===============================
+   出勤予定整形
+=============================== */
 function formatSchedule(schedule) {
   return schedule
     .map(s => `${s.updated ? "★ " : ""}${s.date}  ${s.time}`)
     .join("\n");
 }
 
-// ★ 日付キーで差分判定する新ロジック
+/* ===============================
+   差分判定（強化版）
+=============================== */
 function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
   const oldMap = {};
   oldSchedule.forEach(s => {
-    oldMap[s.date] = s.time;
+    oldMap[normalize(s.date)] = normalize(s.time);
   });
 
   return newSchedule.map(s => {
-    const oldTime = oldMap[s.date];
-    const changed = !oldTime || oldTime !== s.time; // 新規 or 時間変更
+    const dateNorm = normalize(s.date);
+    const timeNorm = normalize(s.time);
+
+    const oldTime = oldMap[dateNorm];
+    const changed = !oldTime || oldTime !== timeNorm;
 
     return {
       date: s.date,
@@ -72,18 +87,22 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
   });
 }
 
-// ★ 出勤時間が入っている最後の index を取得
+/* ===============================
+   最後の出勤日 index
+=============================== */
 function getLastWorkingIndex(schedule) {
   let lastIndex = -1;
   schedule.forEach((s, i) => {
-    if (s.time && s.time !== "-" && s.time !== "") {
+    if (s.time && normalize(s.time) !== "-" && normalize(s.time) !== "") {
       lastIndex = i;
     }
   });
   return lastIndex;
 }
 
-// 出勤表取得
+/* ===============================
+   出勤表取得
+=============================== */
 async function fetchSchedule(url) {
   const res = await axios.get(url, {
     headers: {
@@ -98,60 +117,54 @@ async function fetchSchedule(url) {
   $("#syukin_month .girlitem_waku").each((i, el) => {
     const date = $(el).find(".girlitem_waku_left").text().trim();
     const time = $(el).find(".girlitem_waku_right").text().trim();
-
     schedule.push({ date, time });
   });
 
   return schedule;
 }
 
-// メイン処理
-async function main() {
+/* ===============================
+   メイン処理（WebService用）
+=============================== */
+module.exports = async function () {
+  console.log("heaven-monitor 開始:", getJSTTime());
+
   for (const cast of casts) {
     console.log(`チェック中: ${cast.name}`);
 
     const newSchedule = await fetchSchedule(cast.url);
 
-    // ★ 統合フォルダ用の保存先
     const saveFile = path.join(__dirname, "data", `heaven-last-${cast.name}.json`);
 
-    // ★ 新旧形式どちらにも対応して読み込む
     let oldSchedule = [];
     if (fs.existsSync(saveFile)) {
       const raw = JSON.parse(fs.readFileSync(saveFile, "utf8"));
       oldSchedule = raw.schedule || raw;
     }
 
-    // ★ 出勤時間が入っている最後の日付までに切り取る
     const lastIndex = getLastWorkingIndex(newSchedule);
     const trimmedNew = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : [];
 
-    // ★ 差分判定
     const marked = markUpdatedScheduleByDate(trimmedNew, oldSchedule);
     const hasUpdate = marked.some(s => s.updated);
 
     if (hasUpdate) {
       console.log(`変更あり: ${cast.name}`);
 
-      const lastNoticeTime = getJSTTime();
-
       const saveData = {
         schedule: newSchedule,
-        lastNoticeTime
+        lastNoticeTime: getJSTTime()
       };
 
       fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
 
       const scheduleText = formatSchedule(marked);
 
-      await sendLine(
-        `【出勤表更新】${cast.name}\n\n${scheduleText}`
-      );
-
+      await sendLine(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
     } else {
       console.log(`変更なし: ${cast.name}`);
     }
   }
-}
 
-module.exports = main;
+  console.log("heaven-monitor 完了:", getJSTTime());
+};
