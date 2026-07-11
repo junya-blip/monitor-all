@@ -218,7 +218,7 @@ function saveLastNotice(text) {
 /* ===============================
    メイン処理（WebService用）
 =============================== */
-async function main() {
+module.exports = async function () {
   console.log("bg-monitor 開始:", getJSTTime());
 
   const urls = buildUrls();
@@ -237,7 +237,6 @@ async function main() {
 
   const lastHits = loadLast();
 
-  // 差分判定（正規化して比較）
   const diff = allHits.filter(
     hit => !lastHits.some(
       last =>
@@ -248,12 +247,18 @@ async function main() {
   if (diff.length === 0) {
     console.log("差分なし → 通知なし");
   } else {
+    console.log(`差分あり → ${diff.length} 件`);
+
     let notified = false;
 
     for (const hit of diff) {
+      console.log("通知対象:", hit);
+
       if (config.castFilterEnabled) {
+        console.log("キャストフィルター ON");
+
         if (containsCastName(hit.title)) {
-          await sendLine(hit);
+          console.log(`キャスト一致 → 通知: ${hit.title}`);
 
           const noticeText = [
             hit.date,
@@ -263,11 +268,17 @@ async function main() {
             hit.url
           ].join("\n");
 
+          console.log("通知内容:\n" + noticeText);
+
+          await sendLine(hit);
           saveLastNotice(noticeText);
           notified = true;
+        } else {
+          console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
         }
+
       } else {
-        await sendLine(hit);
+        console.log("キャストフィルター OFF → 通知");
 
         const noticeText = [
           hit.date,
@@ -277,17 +288,21 @@ async function main() {
           hit.url
         ].join("\n");
 
+        console.log("通知内容:\n" + noticeText);
+
+        await sendLine(hit);
         saveLastNotice(noticeText);
         notified = true;
       }
     }
 
     if (notified) {
+      console.log("last.json を更新します");
       saveLast(allHits);
+    } else {
+      console.log("通知なし → last.json は更新しません");
     }
   }
 
   console.log("bg-monitor 完了:", getJSTTime());
-}
-
-module.exports = main;
+};
