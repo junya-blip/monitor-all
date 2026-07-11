@@ -240,33 +240,57 @@ async function main() {
     )
   );
 
-  if (diff.length === 0) {
-    console.log("差分なし → 通知なし");
-  } else {
-    console.log("差分あり → 通知開始");
+	if (diff.length === 0) {
+	  console.log("差分なし → 通知なし");
+	} else {
+	  // 差分あり
+	  let notified = false;
 
-    for (const hit of diff) {
-      if (config.castFilterEnabled) {
-        if (containsCastName(hit.title)) {
-          await sendLine(hit);
-        }
-      } else {
-        await sendLine(hit);
-      }
+	  for (const hit of diff) {
+	    if (config.castFilterEnabled) {
+	      if (containsCastName(hit.title)) {
+	        console.log("差分あり → 通知開始（キャスト一致）");
+	        await sendLine(hit);
 
-      const noticeText = [
-        hit.date,
-        hit.title,
-        hit.keyword,
-        hit.shift,
-        hit.url
-      ].join("\n");
+	        const noticeText = [
+	          hit.date,
+	          hit.title,
+	          hit.keyword,
+	          hit.shift,
+	          hit.url
+	        ].join("\n");
 
-      saveLastNotice(noticeText);
-    }
-  }
+	        saveLastNotice(noticeText);
+	        notified = true;
+	      } else {
+	        console.log(`差分あり → キャスト不一致（${hit.title}）`);
+	        // 通知しない
+	        // bg-last.json も更新しない
+	      }
+	    } else {
+	      console.log("差分あり → 通知開始（フィルターOFF）");
+	      await sendLine(hit);
 
-  saveLast(allHits);
+	      const noticeText = [
+	        hit.date,
+	        hit.title,
+	        hit.keyword,
+	        hit.shift,
+	        hit.url
+	      ].join("\n");
+
+	      saveLastNotice(noticeText);
+	      notified = true;
+	    }
+	  }
+
+	  // LINE通知が実際に送られた場合のみ last を更新
+	  if (notified) {
+	    saveLast(allHits);
+	  } else {
+	    console.log("通知対象キャストが存在しないため、last.json は更新しません");
+	  }
+	}
 
   console.log("bg-monitor 完了:", getJSTTime());
 }
