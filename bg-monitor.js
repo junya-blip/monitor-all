@@ -252,8 +252,6 @@ module.exports = async function () {
     let notified = false;
 
     for (const hit of diff) {
-      console.log("通知対象:", hit);
-
       if (config.castFilterEnabled) {
         console.log("キャストフィルター ON");
 
@@ -297,10 +295,7 @@ module.exports = async function () {
     }
 
     if (notified) {
-      console.log("last.json を更新します");
       saveLast(allHits);
-    } else {
-      console.log("通知なし → last.json は更新しません");
     }
   }
 
