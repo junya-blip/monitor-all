@@ -2,7 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-/* ★★★★★ JST固定の時刻を返す関数（ズレない） ★★★★★ */
+/* ★★★★★ JST固定の時刻を返す関数 ★★★★★ */
 function getJSTTime() {
   const date = new Date();
   const jst = new Date(date.getTime() + (9 * 60 * 60 * 1000)); // UTC → JST
@@ -54,6 +54,9 @@ async function fetchPickup() {
   return { period, names };
 }
 
+/* ============================================================
+   ★★★ LINE通知 ★★★
+============================================================ */
 async function sendLine(message) {
   await axios.post(
     'https://api.line.me/v2/bot/message/push',
@@ -70,42 +73,60 @@ async function sendLine(message) {
   );
 }
 
+/* ============================================================
+   ★★★ last.json 読み込み（壊れた形式にも対応） ★★★
+============================================================ */
+function loadLast(saveFile) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
+
+    // ★ 配列形式（正しい形式）
+    if (Array.isArray(raw)) {
+      return { period: '', names: raw, lastNoticeTime: null };
+    }
+
+    // ★ オブジェクト形式（壊れた形式）
+    return {
+      period: raw.period || '',
+      names: Array.isArray(raw.names) ? raw.names : [],
+      lastNoticeTime: raw.lastNoticeTime || null
+    };
+
+  } catch {
+    return { period: '', names: [], lastNoticeTime: null };
+  }
+}
+
+/* ============================================================
+   ★★★ last.json 保存（常に配列形式で保存） ★★★
+============================================================ */
+function saveLast(saveFile, period, names, lastNoticeTime) {
+  const data = {
+    period,
+    names,
+    lastNoticeTime
+  };
+  fs.writeFileSync(saveFile, JSON.stringify(data, null, 2));
+}
+
+/* ============================================================
+   ★★★ メイン処理 ★★★
+============================================================ */
 async function run() {
   const data = await fetchPickup();
 
-  // ★ 統合フォルダ用の保存先
   const saveFile = path.join(__dirname, "data", "pickup-last.json");
 
-  // ★ 新旧形式どちらにも対応して読み込む
-  let last = { period: '', names: [], lastNoticeTime: null };
-  if (fs.existsSync(saveFile)) {
-    const raw = JSON.parse(fs.readFileSync(saveFile, 'utf8'));
-    last = {
-      period: raw.period || '',
-      names: raw.names || [],
-      lastNoticeTime: raw.lastNoticeTime || null
-    };
-  }
+  const last = loadLast(saveFile);
 
-  /* ============================================================
-     ★★★ ① ピックアップ対象が 0 件なら通知しない（重要） ★★★
-     ============================================================ */
+  /* ① names が 0 件なら通知しない */
   if (data.names.length === 0) {
     console.log("対象なし → 通知しない");
-
-    const saveData = {
-      period: data.period,
-      names: [],
-      lastNoticeTime: getJSTTime()
-    };
-
-    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+    saveLast(saveFile, data.period, [], getJSTTime());
     return;
   }
 
-  /* ============================================================
-     ★★★ ② names が 1 件以上のときだけ差分判定する ★★★
-     ============================================================ */
+  /* ② 差分判定 */
   const isPeriodChanged = last.period !== data.period;
   const isNamesChanged =
     data.names.length !== last.names.length ||
@@ -114,33 +135,18 @@ async function run() {
   if (isPeriodChanged || isNamesChanged) {
     console.log("change detected, sending LINE...");
 
-    const namesText = data.names.join('\n');
-
     const msg =
       `【ピックアップ奥様更新】\n` +
       `${data.period}\n` +
-      `${namesText}`;
+      `${data.names.join('\n')}`;
 
     await sendLine(msg);
 
-    const saveData = {
-      period: data.period,
-      names: data.names,
-      lastNoticeTime: getJSTTime()
-    };
-
-    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+    saveLast(saveFile, data.period, data.names, getJSTTime());
 
   } else {
     console.log("no change");
-
-    const saveData = {
-      period: data.period,
-      names: data.names,
-      lastNoticeTime: last.lastNoticeTime
-    };
-
-    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+    saveLast(saveFile, data.period, data.names, last.lastNoticeTime);
   }
 
   return 'done';
