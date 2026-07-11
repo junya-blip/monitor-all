@@ -19,6 +19,17 @@ function getJSTTime() {
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
 
+async function sendDiscord(message) {
+  try {
+    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+      content: message
+    });
+  } catch (err) {
+    console.error("Discord通知エラー:", err.response?.data || err);
+  }
+}
+
+
 /* ===============================
    ピックアップ奥様取得
 =============================== */
@@ -144,7 +155,8 @@ module.exports = async function () {
       `${data.period}\n` +
       `${data.names.join('\n')}`;
 
-    await sendLine(msg);
+    //await sendLine(msg);
+    await sendDiscord(msg);
 
     saveLast(saveFile, data.period, data.names, getJSTTime());
   } else {

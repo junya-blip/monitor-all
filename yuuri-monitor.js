@@ -24,6 +24,19 @@ function getJSTTime() {
 }
 
 /* ===============================
+   Discord通知（送るだけ）
+=============================== */
+async function sendDiscord(message) {
+  try {
+    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+      content: message
+    });
+  } catch (err) {
+    console.error("Discord通知エラー:", err.response?.data || err);
+  }
+}
+
+/* ===============================
    正規化（揺れ対策）
 =============================== */
 function normalize(text) {
@@ -96,7 +109,7 @@ function isDifferent(a, b) {
 }
 
 /* ===============================
-   LINE通知
+   LINE通知（来月復活用）
 =============================== */
 async function sendLine(post) {
   const fullUrl = post.link
@@ -140,7 +153,23 @@ module.exports = async function () {
   if (!last || isDifferent(latest, last)) {
     console.log("差分あり → 通知します");
 
-    await sendLine(latest);
+    // ===== 整形（LINEと同じ構造） =====
+    const fullUrl = latest.link
+      ? "https://fukuharaso-pu.com" + latest.link
+      : "URL取得失敗";
+
+    const titleText = latest.title || "タイトル取得失敗";
+
+    const message =
+      `ゆうりちゃんの日記が更新されました！\n\n` +
+      `タイトル: ${titleText}\n\n` +
+      `URL: ${fullUrl}`;
+
+    // ===== 今月は Discord に通知 =====
+    await sendDiscord(message);
+
+    // ===== 来月はこれに戻すだけ =====
+    // await sendLine(latest);
 
     saveLast({
       title: latest.title,

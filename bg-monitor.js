@@ -26,6 +26,19 @@ function getJSTTime() {
 }
 
 /* ===============================
+   Discord通知（送るだけ）
+=============================== */
+async function sendDiscord(message) {
+  try {
+    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+      content: message
+    });
+  } catch (err) {
+    console.error("Discord通知エラー:", err.response?.data || err);
+  }
+}
+
+/* ===============================
    config.json 読み込み
 =============================== */
 function loadConfig() {
@@ -82,9 +95,17 @@ function uniqueHits(hits) {
 }
 
 /* ===============================
-   LINE通知
+   LINE通知（来月復活用）
 =============================== */
 async function sendLine(hit) {
+  const noticeText = [
+    hit.date,
+    hit.title,
+    hit.keyword,
+    hit.shift,
+    hit.url
+  ].join("\n");
+
   await axios.post(
     "https://api.line.me/v2/bot/message/push",
     {
@@ -92,12 +113,7 @@ async function sendLine(hit) {
       messages: [
         {
           type: "text",
-          text:
-            `${hit.date}\n` +
-            `${hit.title}\n` +
-            `${hit.keyword}\n` +
-            `${hit.shift}\n` +
-            `${hit.url}`
+          text: noticeText
         }
       ]
     },
@@ -251,23 +267,27 @@ module.exports = async function () {
     let notified = false;
 
     for (const hit of diff) {
+      const noticeText = [
+        hit.date,
+        hit.title,
+        hit.keyword,
+        hit.shift,
+        hit.url
+      ].join("\n");
+
       if (config.castFilterEnabled) {
         console.log("キャストフィルター ON");
 
         if (containsCastName(hit.title)) {
           console.log(`キャスト一致 → 通知: ${hit.title}`);
-
-          const noticeText = [
-            hit.date,
-            hit.title,
-            hit.keyword,
-            hit.shift,
-            hit.url
-          ].join("\n");
-
           console.log("通知内容:\n" + noticeText);
 
-          await sendLine(hit);
+          // ===== 今月は Discord に通知 =====
+          await sendDiscord(noticeText);
+
+          // ===== 来月はこれに戻すだけ =====
+          // await sendLine(hit);
+
           saveLastNotice(noticeText);
           notified = true;
         } else {
@@ -276,18 +296,14 @@ module.exports = async function () {
 
       } else {
         console.log("キャストフィルター OFF → 通知");
-
-        const noticeText = [
-          hit.date,
-          hit.title,
-          hit.keyword,
-          hit.shift,
-          hit.url
-        ].join("\n");
-
         console.log("通知内容:\n" + noticeText);
 
-        await sendLine(hit);
+        // ===== 今月は Discord に通知 =====
+        await sendDiscord(noticeText);
+
+        // ===== 来月はこれに戻すだけ =====
+        // await sendLine(hit);
+
         saveLastNotice(noticeText);
         notified = true;
       }

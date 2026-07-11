@@ -25,6 +25,19 @@ function getJSTTime() {
 }
 
 /* ===============================
+   Discord通知（送るだけ）
+=============================== */
+async function sendDiscord(message) {
+  try {
+    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
+      content: message
+    });
+  } catch (err) {
+    console.error("Discord通知エラー:", err.response?.data || err);
+  }
+}
+
+/* ===============================
    正規化（揺れ対策）
 =============================== */
 function normalize(text) {
@@ -35,7 +48,7 @@ function normalize(text) {
 }
 
 /* ===============================
-   LINE通知
+   LINE通知（来月復活用）
 =============================== */
 async function sendLine(message) {
   await axios.post(
@@ -159,7 +172,12 @@ module.exports = async function () {
 
       const scheduleText = formatSchedule(marked);
 
-      await sendLine(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
+      // ===== 今月は Discord に通知 =====
+      await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
+
+      // ===== 来月はこれに戻すだけ =====
+      // await sendLine(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
+
     } else {
       console.log(`変更なし: ${cast.name}`);
     }
