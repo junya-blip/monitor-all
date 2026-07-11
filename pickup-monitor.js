@@ -116,17 +116,14 @@ async function run() {
   const data = await fetchPickup();
 
   const saveFile = path.join(__dirname, "data", "pickup-last.json");
-
   const last = loadLast(saveFile);
 
-  /* ① names が 0 件なら通知しない */
   if (data.names.length === 0) {
     console.log("対象なし → 通知しない");
     saveLast(saveFile, data.period, [], getJSTTime());
     return;
   }
 
-  /* ② 差分判定 */
   const isPeriodChanged = last.period !== data.period;
   const isNamesChanged =
     data.names.length !== last.names.length ||
@@ -140,7 +137,12 @@ async function run() {
       `${data.period}\n` +
       `${data.names.join('\n')}`;
 
-    await sendLine(msg);
+    try {
+      await sendLine(msg);
+    } catch (e) {
+      console.log("LINE送信エラー:", e.message);
+      // ★★★ 送信失敗しても last.json は更新する ★★★
+    }
 
     saveLast(saveFile, data.period, data.names, getJSTTime());
 
