@@ -100,6 +100,8 @@ app.get("/dashboard", (req, res) => {
       pre {
         white-space: pre-wrap;
         color: #ccc;
+        font-size: 16px;
+        line-height: 1.6;
       }
     </style>
   </head>
@@ -110,7 +112,7 @@ app.get("/dashboard", (req, res) => {
     <div class="box">
       <h2>アバンチュール-ピックアップ奥様</h2>
       <p>期間: ${pickup.period || "-"}</p>
-      <p>奥様: ${pickup.names?.join(", ") || "-"}</p>
+      <p>対象奥様: ${pickup.names?.join(", ") || "-"}</p>
       <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
     </div>
 
