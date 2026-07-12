@@ -13,8 +13,6 @@ const KEYWORDS = ["キャンセル発生", "急遽出勤", "出勤延長"];
 =============================== */
 function getJSTTime() {
   const now = new Date();
-
-  // UTC → JST（+9時間）
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
   const yyyy = jst.getUTCFullYear();
@@ -220,7 +218,7 @@ function saveLast(data) {
 }
 
 /* ===============================
-   lastNotice.json
+   lastNotice.json（複数件対応版）
 =============================== */
 function saveLastNotice(text) {
   const file = path.join(__dirname, "data", "bg-lastNotice.json");
@@ -268,6 +266,7 @@ module.exports = async function () {
     console.log(`差分あり → ${diff.length} 件`);
 
     let notified = false;
+    const noticeList = [];
 
     for (const hit of diff) {
       const noticeText = [
@@ -278,20 +277,14 @@ module.exports = async function () {
         hit.url
       ].join("\n");
 
+      noticeList.push(noticeText);
+
       if (config.castFilterEnabled) {
         console.log("キャストフィルター ON");
 
         if (containsCastName(hit.title)) {
           console.log(`キャスト一致 → 通知: ${hit.title}`);
-          console.log("通知内容:\n" + noticeText);
-
-          // ===== 今月は Discord に通知 =====
           await sendDiscord(noticeText);
-
-          // ===== 来月はこれに戻すだけ =====
-          // await sendLine(hit);
-
-          saveLastNotice(noticeText);
           notified = true;
         } else {
           console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
@@ -299,21 +292,17 @@ module.exports = async function () {
 
       } else {
         console.log("キャストフィルター OFF → 通知");
-        console.log("通知内容:\n" + noticeText);
-
-        // ===== 今月は Discord に通知 =====
         await sendDiscord(noticeText);
-
-        // ===== 来月はこれに戻すだけ =====
-        // await sendLine(hit);
-
-        saveLastNotice(noticeText);
         notified = true;
       }
     }
 
     if (notified) {
       saveLast(allHits);
+
+      // ★ 複数件まとめて保存（ダッシュボードで全部表示できる）
+      const mergedText = noticeList.join("\n\n");
+      saveLastNotice(mergedText);
     }
   }
 
