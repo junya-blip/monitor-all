@@ -181,8 +181,8 @@ app.get("/dashboard", (req, res) => {
     <div class="box">
       <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
+      <pre>${linkify(bgNotice.lastNotice) || "-"}</pre>
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
-      <p>${linkify(bgNotice.lastNotice) || "-"}</p>
 
     </div>
 
