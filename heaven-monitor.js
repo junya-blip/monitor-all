@@ -11,15 +11,18 @@ const USER_ID = process.env.LINE_USER_ID;
    JST固定の時刻
 =============================== */
 function getJSTTime() {
-  const jst = new Date(); 
+  const now = new Date();
 
-  const yyyy = jst.getFullYear();
-  const mm = String(jst.getMonth() + 1).padStart(2, "0");
-  const dd = String(jst.getDate()).padStart(2, "0");
+  // UTC → JST（+9時間）
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
-  const hh = String(jst.getHours()).padStart(2, "0");
-  const mi = String(jst.getMinutes()).padStart(2, "0");
-  const ss = String(jst.getSeconds()).padStart(2, "0");
+  const yyyy = jst.getUTCFullYear();
+  const mm = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(jst.getUTCDate()).padStart(2, "0");
+
+  const hh = String(jst.getUTCHours()).padStart(2, "0");
+  const mi = String(jst.getUTCMinutes()).padStart(2, "0");
+  const ss = String(jst.getUTCSeconds()).padStart(2, "0");
 
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
