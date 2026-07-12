@@ -103,6 +103,9 @@ app.get("/dashboard", (req, res) => {
         font-size: 16px;
         line-height: 1.6;
       }
+      a {
+	    word-break: break-all;
+	  }
     </style>
   </head>
   <body>
