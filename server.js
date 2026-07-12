@@ -182,15 +182,22 @@ app.get("/dashboard", (req, res) => {
       <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
-      <pre>${bgNotice.lastNotice || "-"}</pre>
+      <p>${linkify(bgNotice.lastNotice) || "-"}</p>
+
     </div>
 
-    <div class="box">
-      <h2>ゆうりちゃんの日記</h2>
-      <p>タイトル: ${yuuri.title || "-"}</p>
-      <p>URL: ${yuuri.link || "-"}</p>
-      <p>最終通知: ${yuuri.lastNoticeTime || "-"}</p>
-    </div>
+	<div class="box">
+	  <h2>ゆうりちゃんの日記</h2>
+	  <p>タイトル: ${yuuri.title || "-"}</p>
+	  <p>
+	    URL: ${
+	      yuuri.link
+	        ? `<a href="https://fukuharaso-pu.com${yuuri.link}" target="_blank" style="color:#4ea3ff;">${yuuri.link}</a>`
+	        : "-"
+	    }
+	  </p>
+	  <p>最終通知: ${yuuri.lastNoticeTime || "-"}</p>
+	</div>
 
   </body>
   </html>
@@ -224,6 +231,15 @@ function getJSTTime() {
   const ss = String(jst.getUTCSeconds()).padStart(2, "0");
 
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+function linkify(text) {
+  if (!text) return "-";
+
+  return text.replace(
+    /(https?:\/\/[^\s]+)/g,
+    '<a href="$1" target="_blank" style="color:#4ea3ff;">$1</a>'
+  );
 }
 
 // WebService 起動
