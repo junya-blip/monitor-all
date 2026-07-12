@@ -299,13 +299,14 @@ module.exports = async function () {
       }
     }
 
-    if (notified) {
-      saveLast(allHits);
+	if (notified) {
+	  // ★ diff だけ保存する（最新ヒット数と通知内容を一致させる）
+	  saveLast(diff);
 
-      // ★ 複数件まとめて保存（ダッシュボードで全部表示できる）
-      const mergedText = noticeList.join("\n\n");
-      saveLastNotice(mergedText);
-    }
+	  // ★ 通知内容も diff の分だけまとめて保存
+	  const mergedText = noticeList.join("\n\n");
+	  saveLastNotice(mergedText);
+	}
   }
 
   console.log("bg-monitor 完了:", getJSTTime());
