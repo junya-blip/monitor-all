@@ -277,6 +277,8 @@ module.exports = async function () {
         hit.url
       ].join("\n");
 
+      console.log("通知内容:\n" + noticeText);
+
       noticeList.push(noticeText);
 
       if (config.castFilterEnabled) {
