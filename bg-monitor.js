@@ -300,10 +300,15 @@ module.exports = async function () {
     }
 
 	if (notified) {
-	  // ★ diff だけ保存する（最新ヒット数と通知内容を一致させる）
-	  saveLast(diff);
+	  // ★ 現在もキーワードが存在するヒットだけ抽出
+	  const activeHits = allHits.filter(hit =>
+	    KEYWORDS.some(k => hit.keyword.includes(k))
+	  );
 
-	  // ★ 通知内容も diff の分だけまとめて保存
+	  // ★ ダッシュボード用に保存（最新ヒット数と表示内容が一致）
+	  saveLast(activeHits);
+
+	  // ★ 通知内容は diff の分だけまとめて保存（これは今まで通り）
 	  const mergedText = noticeList.join("\n\n");
 	  saveLastNotice(mergedText);
 	}
