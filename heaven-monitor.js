@@ -177,12 +177,18 @@ module.exports = async function () {
 
       let notifyList = [];
 
-      if (lastIndex === -1) {
-        // ★ 全日 "-" の場合 → 特別通知
-        notifyList = [{ date: "", time: "", updated: true }];
-        await sendDiscord(`【出勤表更新】${cast.name}\n\n出勤予定なし`);
-        continue;
-      }
+		if (lastIndex === -1) {
+		  // ★ 全日 "-" の場合 → 特別通知
+		  const saveData = {
+		    schedule: [],
+		    noSchedule: true,
+		    lastNoticeTime: getJSTTime()
+		  };
+		  fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+
+		  await sendDiscord(`【出勤表更新】${cast.name}\n\n出勤予定なし`);
+		  continue;
+		}
 
       notifyList = marked.slice(0, lastIndex + 1);
 

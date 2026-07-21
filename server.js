@@ -148,38 +148,55 @@ app.get("/dashboard", (req, res) => {
   	  </style>
 
 	  <div class="heaven-grid">
-	    ${heavenData.map(h => {
-	      const schedule = h.data.schedule || h.data;
+		${heavenData.map(h => {
+		  const data = h.data;
 
-	      // 出勤が入っている最後の日を探す
-	      let lastWorkIndex = -1;
-	      if (Array.isArray(schedule)) {
-	        schedule.forEach((item, idx) => {
-	          if (item.time && item.time !== "_" && item.time !== "-") {
-	            lastWorkIndex = idx;
-	          }
-	        });
-	      }
+		  // ★ noSchedule の場合は「出勤予定なし」だけ表示
+		  if (data.noSchedule) {
+		    return `
+		      <div class="heaven-col">
+		        <h3>${h.name}</h3>
+		        <div class="heaven-row">出勤予定なし</div>
+		        <p>最終通知: ${data.lastNoticeTime || "-"}</p>
+		      </div>
+		    `;
+		  }
 
-	      // 表示する範囲を決定（出勤がある日まで）
-	      const visibleSchedule =
-	        lastWorkIndex >= 0 ? schedule.slice(0, lastWorkIndex + 1) : schedule;
+		  // ★ 通常の schedule 表示
+		  const schedule = data.schedule || data;
 
-			const rows = Array.isArray(visibleSchedule)
-			  ? visibleSchedule.map(item => {
-			      const time = (item.time === "_" || item.time === "-") ? "-" : item.time;
-			      return `<div class="heaven-row">${item.date} ${time}</div>`;
-			    }).join("")
-			  : "<div>データなし</div>";
+		  // 出勤が入っている最後の日を探す
+		  let lastWorkIndex = -1;
+		  if (Array.isArray(schedule)) {
+		    schedule.forEach((item, idx) => {
+		      if (item.time && item.time !== "_" && item.time !== "-") {
+		        lastWorkIndex = idx;
+		      }
+		    });
+		  }
 
-	      return `
-	        <div class="heaven-col">
-	          <h3>${h.name}</h3>
-	          ${rows}
-	          <p>最終通知: ${h.data.lastNoticeTime || "-"}</p>
-	        </div>
-	      `;
-	    }).join("")}
+		  // 表示する範囲を決定（出勤がある日まで）
+		  const visibleSchedule =
+		    lastWorkIndex >= 0 ? schedule.slice(0, lastWorkIndex + 1) : schedule;
+
+		  const rows = Array.isArray(visibleSchedule)
+		    ? visibleSchedule
+		        .map(item => {
+		          const time =
+		            item.time === "_" || item.time === "-" ? "-" : item.time;
+		          return `<div class="heaven-row">${item.date} ${time}</div>`;
+		        })
+		        .join("")
+		    : "<div>データなし</div>";
+
+		  return `
+		    <div class="heaven-col">
+		      <h3>${h.name}</h3>
+		      ${rows}
+		      <p>最終通知: ${data.lastNoticeTime || "-"}</p>
+		    </div>
+		  `;
+		}).join("")}
 	  </div>
 	</div>
 
