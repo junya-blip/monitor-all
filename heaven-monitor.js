@@ -103,6 +103,20 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
 }
 
 /* ===============================
+   最後の出勤日 index（"-" 以外がある最後の日）
+=============================== */
+function getLastWorkingIndex(schedule) {
+  let lastIndex = -1;
+  schedule.forEach((s, i) => {
+    const t = normalize(s.time);
+    if (t !== "-" && t !== "") {
+      lastIndex = i;
+    }
+  });
+  return lastIndex;
+}
+
+/* ===============================
    出勤表取得
 =============================== */
 async function fetchSchedule(url) {
@@ -144,22 +158,35 @@ module.exports = async function () {
       oldSchedule = raw.schedule || raw;
     }
 
-    // ★ 全日付を比較対象にする（trimしない）
+    // ★ 差分判定は全日付で行う
     const marked = markUpdatedScheduleByDate(newSchedule, oldSchedule);
-
     const hasUpdate = marked.some(s => s.updated);
 
     if (hasUpdate) {
       console.log(`変更あり: ${cast.name}`);
 
+      // ★ 保存（全日付）
       const saveData = {
         schedule: newSchedule,
         lastNoticeTime: getJSTTime()
       };
-
       fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
 
-      const scheduleText = formatSchedule(marked);
+      // ★ 通知内容は「最後の出勤日まで」に限定
+      const lastIndex = getLastWorkingIndex(newSchedule);
+
+      let notifyList = [];
+
+      if (lastIndex === -1) {
+        // ★ 全日 "-" の場合 → 特別通知
+        notifyList = [{ date: "", time: "", updated: true }];
+        await sendDiscord(`【出勤表更新】${cast.name}\n\n出勤予定なし`);
+        continue;
+      }
+
+      notifyList = marked.slice(0, lastIndex + 1);
+
+      const scheduleText = formatSchedule(notifyList);
 
       await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
 
