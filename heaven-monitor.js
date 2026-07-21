@@ -156,11 +156,13 @@ module.exports = async function () {
         return t === "-" || t === "";
       });
 
+    // ★ 全日 "-" が継続 → 通知しない
     if (allDash && oldAllDash) {
       console.log(`変更なし（出勤予定なし継続）: ${cast.name}`);
       continue;
     }
 
+    // ★ 全日 "-" に変化 → 初回だけ通知
     if (allDash && !oldAllDash) {
       console.log(`変更あり（出勤予定なしに変化）: ${cast.name}`);
 
