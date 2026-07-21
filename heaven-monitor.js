@@ -49,25 +49,6 @@ function normalize(text) {
 }
 
 /* ===============================
-   LINE通知（来月復活用）
-=============================== */
-async function sendLine(message) {
-  await axios.post(
-    "https://api.line.me/v2/bot/message/push",
-    {
-      to: USER_ID,
-      messages: [{ type: "text", text: message }]
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
-}
-
-/* ===============================
    出勤予定整形
 =============================== */
 function formatSchedule(schedule) {
@@ -77,7 +58,7 @@ function formatSchedule(schedule) {
 }
 
 /* ===============================
-   差分判定（完全比較版）
+   差分判定（完全比較）
 =============================== */
 function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
   const oldMap = {};
@@ -88,10 +69,8 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
   return newSchedule.map(s => {
     const dateNorm = normalize(s.date);
     const timeNorm = normalize(s.time);
-
     const oldTime = oldMap[dateNorm];
 
-    // ★ 時間が追加・変更・削除されたら updated = true
     const changed = oldTime !== timeNorm;
 
     return {
@@ -103,7 +82,7 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
 }
 
 /* ===============================
-   最後の出勤日 index（"-" 以外がある最後の日）
+   最後の出勤日 index
 =============================== */
 function getLastWorkingIndex(schedule) {
   let lastIndex = -1;
@@ -153,52 +132,75 @@ module.exports = async function () {
     const saveFile = path.join(__dirname, "data", `heaven-last-${cast.name}.json`);
 
     let oldSchedule = [];
+    let oldNoSchedule = false;
+
     if (fs.existsSync(saveFile)) {
       const raw = JSON.parse(fs.readFileSync(saveFile, "utf8"));
-      oldSchedule = raw.schedule || raw;
+      oldSchedule = raw.schedule || [];
+      oldNoSchedule = raw.noSchedule || false;
     }
 
-    // ★ 差分判定は全日付で行う
-    const marked = markUpdatedScheduleByDate(newSchedule, oldSchedule);
-    const hasUpdate = marked.some(s => s.updated);
+    /* ===============================
+       ★ 全日 "-" の特別判定
+    ================================ */
+    const allDash = newSchedule.every(s => {
+      const t = normalize(s.time);
+      return t === "-" || t === "";
+    });
 
-    if (hasUpdate) {
-      console.log(`変更あり: ${cast.name}`);
+    const oldAllDash =
+      oldNoSchedule ||
+      oldSchedule.length === 0 ||
+      oldSchedule.every(s => {
+        const t = normalize(s.time);
+        return t === "-" || t === "";
+      });
 
-      // ★ 保存（全日付）
+    if (allDash && oldAllDash) {
+      console.log(`変更なし（出勤予定なし継続）: ${cast.name}`);
+      continue;
+    }
+
+    if (allDash && !oldAllDash) {
+      console.log(`変更あり（出勤予定なしに変化）: ${cast.name}`);
+
       const saveData = {
-        schedule: newSchedule,
+        schedule: [],
+        noSchedule: true,
         lastNoticeTime: getJSTTime()
       };
       fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
 
-      // ★ 通知内容は「最後の出勤日まで」に限定
-      const lastIndex = getLastWorkingIndex(newSchedule);
-
-      let notifyList = [];
-
-		if (lastIndex === -1) {
-		  // ★ 全日 "-" の場合 → 特別通知
-		  const saveData = {
-		    schedule: [],
-		    noSchedule: true,
-		    lastNoticeTime: getJSTTime()
-		  };
-		  fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
-
-		  await sendDiscord(`【出勤表更新】${cast.name}\n\n出勤予定なし`);
-		  continue;
-		}
-
-      notifyList = marked.slice(0, lastIndex + 1);
-
-      const scheduleText = formatSchedule(notifyList);
-
-      await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
-
-    } else {
-      console.log(`変更なし: ${cast.name}`);
+      await sendDiscord(`【出勤表更新】${cast.name}\n\n出勤予定なし`);
+      continue;
     }
+
+    /* ===============================
+       ★ 通常の差分判定
+    ================================ */
+    const marked = markUpdatedScheduleByDate(newSchedule, oldSchedule);
+    const hasUpdate = marked.some(s => s.updated);
+
+    if (!hasUpdate) {
+      console.log(`変更なし: ${cast.name}`);
+      continue;
+    }
+
+    console.log(`変更あり: ${cast.name}`);
+
+    const saveData = {
+      schedule: newSchedule,
+      noSchedule: false,
+      lastNoticeTime: getJSTTime()
+    };
+    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+
+    const lastIndex = getLastWorkingIndex(newSchedule);
+    const notifyList = marked.slice(0, lastIndex + 1);
+
+    const scheduleText = formatSchedule(notifyList);
+
+    await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
