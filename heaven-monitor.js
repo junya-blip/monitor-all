@@ -12,8 +12,6 @@ const USER_ID = process.env.LINE_USER_ID;
 =============================== */
 function getJSTTime() {
   const now = new Date();
-
-  // UTC → JST（+9時間）
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
   const yyyy = jst.getUTCFullYear();
@@ -28,7 +26,7 @@ function getJSTTime() {
 }
 
 /* ===============================
-   Discord通知（送るだけ）
+   Discord通知
 =============================== */
 async function sendDiscord(message) {
   try {
@@ -41,7 +39,7 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化（揺れ対策）
+   正規化
 =============================== */
 function normalize(text) {
   return (text || "")
@@ -79,7 +77,7 @@ function formatSchedule(schedule) {
 }
 
 /* ===============================
-   差分判定（強化版）
+   差分判定（完全比較版）
 =============================== */
 function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
   const oldMap = {};
@@ -92,7 +90,9 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
     const timeNorm = normalize(s.time);
 
     const oldTime = oldMap[dateNorm];
-    const changed = !oldTime || oldTime !== timeNorm;
+
+    // ★ 時間が追加・変更・削除されたら updated = true
+    const changed = oldTime !== timeNorm;
 
     return {
       date: s.date,
@@ -100,19 +100,6 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
       updated: changed
     };
   });
-}
-
-/* ===============================
-   最後の出勤日 index
-=============================== */
-function getLastWorkingIndex(schedule) {
-  let lastIndex = -1;
-  schedule.forEach((s, i) => {
-    if (s.time && normalize(s.time) !== "-" && normalize(s.time) !== "") {
-      lastIndex = i;
-    }
-  });
-  return lastIndex;
 }
 
 /* ===============================
@@ -139,7 +126,7 @@ async function fetchSchedule(url) {
 }
 
 /* ===============================
-   メイン処理（WebService用）
+   メイン処理
 =============================== */
 module.exports = async function () {
   console.log("heaven-monitor 開始:", getJSTTime());
@@ -157,10 +144,9 @@ module.exports = async function () {
       oldSchedule = raw.schedule || raw;
     }
 
-    const lastIndex = getLastWorkingIndex(newSchedule);
-    const trimmedNew = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : [];
+    // ★ 全日付を比較対象にする（trimしない）
+    const marked = markUpdatedScheduleByDate(newSchedule, oldSchedule);
 
-    const marked = markUpdatedScheduleByDate(trimmedNew, oldSchedule);
     const hasUpdate = marked.some(s => s.updated);
 
     if (hasUpdate) {
@@ -175,11 +161,7 @@ module.exports = async function () {
 
       const scheduleText = formatSchedule(marked);
 
-      // ===== 今月は Discord に通知 =====
       await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
-
-      // ===== 来月はこれに戻すだけ =====
-      // await sendLine(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
 
     } else {
       console.log(`変更なし: ${cast.name}`);
