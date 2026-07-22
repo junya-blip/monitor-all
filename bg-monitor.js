@@ -61,17 +61,14 @@ function containsCastName(title) {
 }
 
 /* ===============================
-   正規化（強化版）
+   正規化（軽め）
 =============================== */
 function normalize(text) {
-  return (text || "")
-    .replace(/\s+/g, "")
-    .replace(/　+/g, "")
-    .trim();
+  return (text || "").trim();
 }
 
 /* ===============================
-   ヒットの正規化（差分判定強化）
+   ヒットの正規化（差分判定を弱める）
 =============================== */
 function normalizeHit(hit) {
   return {
@@ -329,8 +326,10 @@ module.exports = async function () {
 
       saveLast(activeHits);
 
-      const mergedList = [...lastNotice.notices, ...noticeList];
-      saveLastNotice(mergedList);
+      const mergedList = [...(lastNotice.notices || []), ...noticeList];
+
+      // ★ noticeList が空でも保存する（lastNoticeTime を更新する）
+      saveLastNotice(mergedList.length > 0 ? mergedList : lastNotice.notices);
     }
   }
 

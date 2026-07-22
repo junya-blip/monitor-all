@@ -96,6 +96,21 @@ function getLastWorkingIndex(schedule) {
 }
 
 /* ===============================
+   過去日を除外（誤通知防止の要）
+=============================== */
+function filterFuture(schedule) {
+  const today = new Date();
+  const todayY = today.getFullYear();
+  const todayM = today.getMonth() + 1;
+  const todayD = today.getDate();
+
+  return schedule.filter(s => {
+    const d = new Date(s.date.replace(/年|月|日/g, "/"));
+    return d >= new Date(`${todayY}/${todayM}/${todayD}`);
+  });
+}
+
+/* ===============================
    出勤表取得
 =============================== */
 async function fetchSchedule(url) {
@@ -156,13 +171,11 @@ module.exports = async function () {
         return t === "-" || t === "";
       });
 
-    // ★ 全日 "-" が継続 → 通知しない
     if (allDash && oldAllDash) {
       console.log(`変更なし（出勤予定なし継続）: ${cast.name}`);
       continue;
     }
 
-    // ★ 全日 "-" に変化 → 初回だけ通知
     if (allDash && !oldAllDash) {
       console.log(`変更あり（出勤予定なしに変化）: ${cast.name}`);
 
@@ -178,17 +191,20 @@ module.exports = async function () {
     }
 
     /* ===============================
-       ★ 通常の差分判定
+       ★ 過去日を除外して差分判定（誤通知防止）
     ================================ */
-    const marked = markUpdatedScheduleByDate(newSchedule, oldSchedule);
+    const newFuture = filterFuture(newSchedule);
+    const oldFuture = filterFuture(oldSchedule);
+
+    const marked = markUpdatedScheduleByDate(newFuture, oldFuture);
     const hasUpdate = marked.some(s => s.updated);
 
     if (!hasUpdate) {
-      console.log(`変更なし: ${cast.name}`);
+      console.log(`変更なし（未来分に変化なし）: ${cast.name}`);
       continue;
     }
 
-    console.log(`変更あり: ${cast.name}`);
+    console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
     const saveData = {
       schedule: newSchedule,
@@ -197,7 +213,7 @@ module.exports = async function () {
     };
     fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
 
-    const lastIndex = getLastWorkingIndex(newSchedule);
+    const lastIndex = getLastWorkingIndex(newFuture);
     const notifyList = marked.slice(0, lastIndex + 1);
 
     const scheduleText = formatSchedule(notifyList);
