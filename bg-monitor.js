@@ -274,69 +274,68 @@ module.exports = async function () {
     )
   );
 
+  /* ===============================
+     差分なしでも return しない
+  ================================ */
   if (diff.length === 0) {
     console.log("差分なし → 通知なし");
 
-    // ★ 現在も発生中のヒットがあるならダッシュボードに残す
     const activeHits = allHits.filter(hit =>
       KEYWORDS.some(k => hit.keyword.includes(k))
     );
     saveLast(activeHits);
 
-    return;
-  }
+  } else {
+    console.log(`差分あり → ${diff.length} 件`);
 
-  console.log(`差分あり → ${diff.length} 件`);
+    let notified = false;
+    const noticeList = [];
 
-  let notified = false;
-  const noticeList = [];
+    for (const hit of diff) {
+      const noticeText = [
+        hit.date,
+        hit.title,
+        hit.keyword,
+        hit.shift,
+        hit.url
+      ].join("\n");
 
-  for (const hit of diff) {
-    const noticeText = [
-      hit.date,
-      hit.title,
-      hit.keyword,
-      hit.shift,
-      hit.url
-    ].join("\n");
+      console.log("通知内容:\n" + noticeText);
 
-    console.log("通知内容:\n" + noticeText);
+      noticeList.push(noticeText);
 
-    noticeList.push(noticeText);
+      if (config.castFilterEnabled) {
+        console.log("キャストフィルター ON");
 
-    if (config.castFilterEnabled) {
-      console.log("キャストフィルター ON");
+        if (containsCastName(hit.title)) {
+          console.log(`キャスト一致 → 通知: ${hit.title}`);
+          await sendDiscord(noticeText);
+          notified = true;
+        } else {
+          console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
+        }
 
-      if (containsCastName(hit.title)) {
-        console.log(`キャスト一致 → 通知: ${hit.title}`);
+      } else {
+        console.log("キャストフィルター OFF → 通知");
         await sendDiscord(noticeText);
         notified = true;
-      } else {
-        console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
       }
+    }
 
-    } else {
-      console.log("キャストフィルター OFF → 通知");
-      await sendDiscord(noticeText);
-      notified = true;
+    if (notified) {
+      const activeHits = allHits.filter(hit =>
+        KEYWORDS.some(k => hit.keyword.includes(k))
+      );
+
+      saveLast(activeHits);
+
+      const mergedList = [...lastNotice.notices, ...noticeList];
+      saveLastNotice(mergedList);
     }
   }
 
-  if (notified) {
-    // ★ 現在もキーワードが存在するヒットだけ抽出
-    const activeHits = allHits.filter(hit =>
-      KEYWORDS.some(k => hit.keyword.includes(k))
-    );
-
-    // ★ ダッシュボード用に保存（複数件）
-    saveLast(activeHits);
-
-    // ★ 通知内容も複数件を配列で保存
-    const mergedList = [...lastNotice.notices, ...noticeList];
-    saveLastNotice(mergedList);
-  }
-
+  /* ===============================
+     ★ 完了ログを必ず出す
+  ================================ */
   console.log("bg-monitor 完了:", getJSTTime());
-  process.stdout.write("");   // ★ Render でも確実にログを出す
-  await new Promise(r => setTimeout(r, 10));  // ★ 10ms 待つとさらに確実
 };
