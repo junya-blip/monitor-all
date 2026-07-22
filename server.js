@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const app = express();
 
@@ -59,7 +58,7 @@ app.get("/dashboard", (req, res) => {
   // 各 monitor の last.json を読み込む
   const pickup = safeLoad("pickup-last.json");
   const bg = safeLoad("bg-last.json");
-  const bgNotice = safeLoad("bg-lastNotice.json");
+  const bgNotice = safeLoad("bg-lastNotice.json");   // ★ notices[] に対応
   const yuuri = safeLoad("yuuri-last.json");
 
   // heaven-monitor はキャストごとに複数ファイル
@@ -104,8 +103,8 @@ app.get("/dashboard", (req, res) => {
         line-height: 1.6;
       }
       a {
-	    word-break: break-all;
-	  }
+        word-break: break-all;
+      }
     </style>
   </head>
   <body>
@@ -119,107 +118,110 @@ app.get("/dashboard", (req, res) => {
       <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
     </div>
 
-	<div class="box">
-	  <h2>アバンチュール-オキニ出勤情報</h2>
+    <div class="box">
+      <h2>アバンチュール-オキニ出勤情報</h2>
 
-	  <style>
-		.heaven-grid {
-		  display: flex;
-		  gap: 20px;
-		  flex-wrap: wrap;
-		}
+      <style>
+        .heaven-grid {
+          display: flex;
+          gap: 20px;
+          flex-wrap: wrap;
+        }
 
-		.heaven-col {
-		  flex: none;        /* ← これが重要 */
-		  width: auto;       /* ← 中身に合わせる */
-		  background: #333;
-		  padding: 10px;
-		  border-radius: 6px;
-		}
-	    .heaven-col h3 {
-	      margin-top: 0;
-	      color: #fff;
-	    }
-	 	  .heaven-row {
-	 	    padding: 4px 0;
-	 	    border-bottom: 1px solid #444;
-	 	    font-size: 14px;
-	 	  }
-  	  </style>
+        .heaven-col {
+          flex: none;
+          width: auto;
+          background: #333;
+          padding: 10px;
+          border-radius: 6px;
+        }
+        .heaven-col h3 {
+          margin-top: 0;
+          color: #fff;
+        }
+        .heaven-row {
+          padding: 4px 0;
+          border-bottom: 1px solid #444;
+          font-size: 14px;
+        }
+      </style>
 
-	  <div class="heaven-grid">
-		${heavenData.map(h => {
-		  const data = h.data;
+      <div class="heaven-grid">
+        ${heavenData.map(h => {
+          const data = h.data;
 
-		  // ★ noSchedule の場合は「出勤予定なし」だけ表示
-		  if (data.noSchedule) {
-		    return `
-		      <div class="heaven-col">
-		        <h3>${h.name}</h3>
-		        <div class="heaven-row">出勤予定なし</div>
-		        <p>最終通知: ${data.lastNoticeTime || "-"}</p>
-		      </div>
-		    `;
-		  }
+          // ★ noSchedule の場合は「出勤予定なし」だけ表示
+          if (data.noSchedule) {
+            return `
+              <div class="heaven-col">
+                <h3>${h.name}</h3>
+                <div class="heaven-row">出勤予定なし</div>
+                <p>最終通知: ${data.lastNoticeTime || "-"}</p>
+              </div>
+            `;
+          }
 
-		  // ★ 通常の schedule 表示
-		  const schedule = data.schedule || data;
+          // ★ 通常の schedule 表示
+          const schedule = data.schedule || data;
 
-		  // 出勤が入っている最後の日を探す
-		  let lastWorkIndex = -1;
-		  if (Array.isArray(schedule)) {
-		    schedule.forEach((item, idx) => {
-		      if (item.time && item.time !== "_" && item.time !== "-") {
-		        lastWorkIndex = idx;
-		      }
-		    });
-		  }
+          let lastWorkIndex = -1;
+          if (Array.isArray(schedule)) {
+            schedule.forEach((item, idx) => {
+              if (item.time && item.time !== "_" && item.time !== "-") {
+                lastWorkIndex = idx;
+              }
+            });
+          }
 
-		  // 表示する範囲を決定（出勤がある日まで）
-		  const visibleSchedule =
-		    lastWorkIndex >= 0 ? schedule.slice(0, lastWorkIndex + 1) : schedule;
+          const visibleSchedule =
+            lastWorkIndex >= 0 ? schedule.slice(0, lastWorkIndex + 1) : schedule;
 
-		  const rows = Array.isArray(visibleSchedule)
-		    ? visibleSchedule
-		        .map(item => {
-		          const time =
-		            item.time === "_" || item.time === "-" ? "-" : item.time;
-		          return `<div class="heaven-row">${item.date} ${time}</div>`;
-		        })
-		        .join("")
-		    : "<div>データなし</div>";
+          const rows = Array.isArray(visibleSchedule)
+            ? visibleSchedule
+                .map(item => {
+                  const time =
+                    item.time === "_" || item.time === "-" ? "-" : item.time;
+                  return `<div class="heaven-row">${item.date} ${time}</div>`;
+                })
+                .join("")
+            : "<div>データなし</div>";
 
-		  return `
-		    <div class="heaven-col">
-		      <h3>${h.name}</h3>
-		      ${rows}
-		      <p>最終通知: ${data.lastNoticeTime || "-"}</p>
-		    </div>
-		  `;
-		}).join("")}
-	  </div>
-	</div>
+          return `
+            <div class="heaven-col">
+              <h3>${h.name}</h3>
+              ${rows}
+              <p>最終通知: ${data.lastNoticeTime || "-"}</p>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
 
     <div class="box">
       <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
-      <pre>${linkify(bgNotice.lastNotice) || "-"}</pre>
-      <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
 
+      <pre>
+${Array.isArray(bgNotice.notices)
+  ? bgNotice.notices.map(n => linkify(n)).join("\n\n")
+  : linkify(bgNotice.lastNotice || "-")}
+      </pre>
+
+      <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
     </div>
 
-	<div class="box">
-	  <h2>ゆうりちゃんの日記</h2>
-	  <p>タイトル: ${yuuri.title || "-"}</p>
-	  <p>
-	    URL: ${
-	      yuuri.link
-	        ? `<a href="https://fukuharaso-pu.com${yuuri.link}" target="_blank" style="color:#4ea3ff;">${yuuri.link}</a>`
-	        : "-"
-	    }
-	  </p>
-	  <p>最終通知: ${yuuri.lastNoticeTime || "-"}</p>
-	</div>
+    <div class="box">
+      <h2>ゆうりちゃんの日記</h2>
+      <p>タイトル: ${yuuri.title || "-"}</p>
+      <p>
+        URL: ${
+          yuuri.link
+            ? `<a href="https://fukuharaso-pu.com${yuuri.link}" target="_blank" style="color:#4ea3ff;">${yuuri.link}</a>`
+            : "-"
+        }
+      </p>
+      <p>最終通知: ${yuuri.lastNoticeTime || "-"}</p>
+    </div>
 
   </body>
   </html>
@@ -240,8 +242,6 @@ function safeLoad(filename) {
 
 function getJSTTime() {
   const now = new Date();
-
-  // UTC → JST（+9時間）
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
   const yyyy = jst.getUTCFullYear();

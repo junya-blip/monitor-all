@@ -220,14 +220,27 @@ function saveLast(data) {
 /* ===============================
    lastNotice.json（複数件対応版）
 =============================== */
-function saveLastNotice(text) {
+function loadLastNotice() {
+  const file = path.join(__dirname, "data", "bg-lastNotice.json");
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8"));
+  } catch {
+    return { notices: [], lastNoticeTime: "-" };
+  }
+}
+
+function saveLastNotice(notices) {
   const file = path.join(__dirname, "data", "bg-lastNotice.json");
   fs.writeFileSync(
     file,
-    JSON.stringify({
-      lastNotice: text,
-      lastNoticeTime: getJSTTime()
-    })
+    JSON.stringify(
+      {
+        notices,
+        lastNoticeTime: getJSTTime()
+      },
+      null,
+      2
+    )
   );
 }
 
@@ -252,6 +265,7 @@ module.exports = async function () {
   allHits = uniqueHits(allHits);
 
   const lastHits = loadLast();
+  const lastNotice = loadLastNotice();
 
   const diff = allHits.filter(
     hit => !lastHits.some(
@@ -262,56 +276,64 @@ module.exports = async function () {
 
   if (diff.length === 0) {
     console.log("差分なし → 通知なし");
-  } else {
-    console.log(`差分あり → ${diff.length} 件`);
 
-    let notified = false;
-    const noticeList = [];
+    // ★ 現在も発生中のヒットがあるならダッシュボードに残す
+    const activeHits = allHits.filter(hit =>
+      KEYWORDS.some(k => hit.keyword.includes(k))
+    );
+    saveLast(activeHits);
 
-    for (const hit of diff) {
-      const noticeText = [
-        hit.date,
-        hit.title,
-        hit.keyword,
-        hit.shift,
-        hit.url
-      ].join("\n");
+    return;
+  }
 
-      console.log("通知内容:\n" + noticeText);
+  console.log(`差分あり → ${diff.length} 件`);
 
-      noticeList.push(noticeText);
+  let notified = false;
+  const noticeList = [];
 
-      if (config.castFilterEnabled) {
-        console.log("キャストフィルター ON");
+  for (const hit of diff) {
+    const noticeText = [
+      hit.date,
+      hit.title,
+      hit.keyword,
+      hit.shift,
+      hit.url
+    ].join("\n");
 
-        if (containsCastName(hit.title)) {
-          console.log(`キャスト一致 → 通知: ${hit.title}`);
-          await sendDiscord(noticeText);
-          notified = true;
-        } else {
-          console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
-        }
+    console.log("通知内容:\n" + noticeText);
 
-      } else {
-        console.log("キャストフィルター OFF → 通知");
+    noticeList.push(noticeText);
+
+    if (config.castFilterEnabled) {
+      console.log("キャストフィルター ON");
+
+      if (containsCastName(hit.title)) {
+        console.log(`キャスト一致 → 通知: ${hit.title}`);
         await sendDiscord(noticeText);
         notified = true;
+      } else {
+        console.log(`キャスト不一致 → 通知しない: ${hit.title}`);
       }
+
+    } else {
+      console.log("キャストフィルター OFF → 通知");
+      await sendDiscord(noticeText);
+      notified = true;
     }
+  }
 
-	if (notified) {
-	  // ★ 現在もキーワードが存在するヒットだけ抽出
-	  const activeHits = allHits.filter(hit =>
-	    KEYWORDS.some(k => hit.keyword.includes(k))
-	  );
+  if (notified) {
+    // ★ 現在もキーワードが存在するヒットだけ抽出
+    const activeHits = allHits.filter(hit =>
+      KEYWORDS.some(k => hit.keyword.includes(k))
+    );
 
-	  // ★ ダッシュボード用に保存（最新ヒット数と表示内容が一致）
-	  saveLast(activeHits);
+    // ★ ダッシュボード用に保存（複数件）
+    saveLast(activeHits);
 
-	  // ★ 通知内容は diff の分だけまとめて保存（これは今まで通り）
-	  const mergedText = noticeList.join("\n\n");
-	  saveLastNotice(mergedText);
-	}
+    // ★ 通知内容も複数件を配列で保存
+    const mergedList = [...lastNotice.notices, ...noticeList];
+    saveLastNotice(mergedList);
   }
 
   console.log("bg-monitor 完了:", getJSTTime());
