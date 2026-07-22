@@ -337,4 +337,6 @@ module.exports = async function () {
   }
 
   console.log("bg-monitor 完了:", getJSTTime());
+  process.stdout.write("");   // ★ Render でも確実にログを出す
+  await new Promise(r => setTimeout(r, 10));  // ★ 10ms 待つとさらに確実
 };
