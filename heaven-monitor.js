@@ -51,7 +51,10 @@ function normalizeTime(t) {
 }
 
 function normalizeDate(d) {
-  return d.replace(/\s+/g, "").trim();
+  return d
+    .replace(/\(.+\)/, "")  // "(木)" "(金)" "(土)" を除去
+    .replace(/\s+/g, "")
+    .trim();
 }
 
 /* ===============================
