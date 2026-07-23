@@ -116,11 +116,11 @@ app.get("/dashboard", (req, res) => {
 
 	  <p>対象奥様:</p>
 
-	  <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">
-	${pickup.names && pickup.names.length > 0
-	  ? pickup.names.map(n => n.trim()).join("\n")
-	  : "-"}
-	  </pre>
+	  <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">${
+	    pickup.names && pickup.names.length > 0
+	      ? pickup.names.map(n => n.trim()).join("\n")
+	      : "-"
+	  }</pre>
 
 	  <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
 	</div>
