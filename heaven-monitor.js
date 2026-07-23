@@ -234,12 +234,12 @@ module.exports = async function () {
     /* ===============================
        ★ 保存（newSchedule 全体）
     ================================ */
-    const saveData = {
-      schedule: newSchedule,
-      noSchedule: false,
-      lastNoticeTime: getJSTTime()
-    };
-    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+	const saveData = {
+	  schedule: newRange,   // ★ newSchedule → newRange に変更
+	  noSchedule: false,
+	  lastNoticeTime: getJSTTime()
+	};
+	fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
