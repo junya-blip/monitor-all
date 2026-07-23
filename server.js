@@ -114,12 +114,11 @@ app.get("/dashboard", (req, res) => {
 	<div class="box">
 	  <h2>アバンチュール-ピックアップ奥様</h2>
 
-	  <!-- 期間は新仕様では存在しないため非表示 -->
 	  <p>対象奥様:</p>
 
 	  <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">
 	${pickup.names && pickup.names.length > 0
-	  ? pickup.names.join("\n")
+	  ? pickup.names.map(n => n.trim()).join("\n")
 	  : "-"}
 	  </pre>
 
