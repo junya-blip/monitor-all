@@ -39,46 +39,54 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化
+   正規化（表記ゆれ吸収）
 =============================== */
-function normalize(text) {
-  return (text || "")
+function normalizeTime(t) {
+  if (!t) return "-";
+  return t
+    .replace(/&nbsp;/g, "")
     .replace(/\s+/g, "")
-    .replace(/　+/g, "")
+    .replace(/〜|～/g, "-")
     .trim();
 }
 
-/* ===============================
-   出勤予定整形
-=============================== */
-function formatSchedule(schedule) {
-  return schedule
-    .map(s => `${s.updated ? "★ " : ""}${s.date}  ${s.time}`)
-    .join("\n");
+function normalizeDate(d) {
+  return d.replace(/\s+/g, "").trim();
 }
 
 /* ===============================
-   差分判定（完全比較）
+   出勤予定整形（★マークは廃止）
 =============================== */
-function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
-  const oldMap = {};
-  oldSchedule.forEach(s => {
-    oldMap[normalize(s.date)] = normalize(s.time);
-  });
+function formatSchedule(schedule) {
+  return schedule.map(s => `${s.date} ${s.time}`).join("\n");
+}
 
-  return newSchedule.map(s => {
-    const dateNorm = normalize(s.date);
-    const timeNorm = normalize(s.time);
-    const oldTime = oldMap[dateNorm];
+/* ===============================
+   差分判定（集合比較）
+=============================== */
+function diffSchedule(newList, oldList) {
+  const oldMap = new Map(oldList.map(s => [normalizeDate(s.date), normalizeTime(s.time)]));
+  const newMap = new Map(newList.map(s => [normalizeDate(s.date), normalizeTime(s.time)]));
 
-    const changed = oldTime !== timeNorm;
+  const diffs = [];
 
-    return {
-      date: s.date,
-      time: s.time,
-      updated: changed
-    };
-  });
+  // new にある日付 → 追加 or 時間変更
+  for (const [date, time] of newMap.entries()) {
+    if (!oldMap.has(date)) {
+      diffs.push({ date, time, type: "added" });
+    } else if (oldMap.get(date) !== time) {
+      diffs.push({ date, time, type: "changed" });
+    }
+  }
+
+  // old にあるが new にない日付 → 削除
+  for (const [date, time] of oldMap.entries()) {
+    if (!newMap.has(date)) {
+      diffs.push({ date, time, type: "removed" });
+    }
+  }
+
+  return diffs;
 }
 
 /* ===============================
@@ -87,7 +95,7 @@ function markUpdatedScheduleByDate(newSchedule, oldSchedule) {
 function getLastWorkingIndex(schedule) {
   let lastIndex = -1;
   schedule.forEach((s, i) => {
-    const t = normalize(s.time);
+    const t = normalizeTime(s.time);
     if (t !== "-" && t !== "") {
       lastIndex = i;
     }
@@ -96,22 +104,17 @@ function getLastWorkingIndex(schedule) {
 }
 
 /* ===============================
-   過去日を除外（誤通知防止の要）
+   過去日を除外
 =============================== */
 function filterFuture(schedule) {
   const today = new Date();
-  const todayY = today.getFullYear();
-  const todayM = today.getMonth() + 1;
-  const todayD = today.getDate();
+  const todayStr = `${today.getMonth() + 1}/${today.getDate()}`;
 
-  return schedule.filter(s => {
-    const d = new Date(s.date.replace(/年|月|日/g, "/"));
-    return d >= new Date(`${todayY}/${todayM}/${todayD}`);
-  });
+  return schedule.filter(s => normalizeDate(s.date) >= todayStr);
 }
 
 /* ===============================
-   出勤表取得
+   出勤表取得（1か月分）
 =============================== */
 async function fetchSchedule(url) {
   const res = await axios.get(url, {
@@ -126,7 +129,10 @@ async function fetchSchedule(url) {
 
   $("#syukin_month .girlitem_waku").each((i, el) => {
     const date = $(el).find(".girlitem_waku_left").text().trim();
-    const time = $(el).find(".girlitem_waku_right").text().trim();
+
+    const rawTime = $(el).find(".girlitem_waku_right").html() || "";
+    const time = normalizeTime(rawTime.replace(/<[^>]+>/g, "").trim());
+
     schedule.push({ date, time });
   });
 
@@ -156,20 +162,13 @@ module.exports = async function () {
     }
 
     /* ===============================
-       ★ 全日 "-" の特別判定
+       ★ 全日 "-" の特別判定（出勤予定なし）
     ================================ */
-    const allDash = newSchedule.every(s => {
-      const t = normalize(s.time);
-      return t === "-" || t === "";
-    });
-
+    const allDash = newSchedule.every(s => normalizeTime(s.time) === "-");
     const oldAllDash =
       oldNoSchedule ||
       oldSchedule.length === 0 ||
-      oldSchedule.every(s => {
-        const t = normalize(s.time);
-        return t === "-" || t === "";
-      });
+      oldSchedule.every(s => normalizeTime(s.time) === "-");
 
     if (allDash && oldAllDash) {
       console.log(`変更なし（出勤予定なし継続）: ${cast.name}`);
@@ -191,34 +190,42 @@ module.exports = async function () {
     }
 
     /* ===============================
-       ★ 過去日を除外して差分判定（誤通知防止）
+       ★ ヘブン側の「出勤予定が入っている最後の日」まで抽出
     ================================ */
-    const newFuture = filterFuture(newSchedule);
+    const lastIndex = getLastWorkingIndex(newSchedule);
+    const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : newSchedule;
+
+    /* ===============================
+       ★ 過去日を除外して差分判定
+    ================================ */
     const oldFuture = filterFuture(oldSchedule);
+    const newFuture = filterFuture(newRange);
 
-    const marked = markUpdatedScheduleByDate(newFuture, oldFuture);
-    const hasUpdate = marked.some(s => s.updated);
+    const diffs = diffSchedule(newFuture, oldFuture);
 
-    if (!hasUpdate) {
+    if (diffs.length === 0) {
       console.log(`変更なし（未来分に変化なし）: ${cast.name}`);
       continue;
     }
 
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
+    /* ===============================
+       ★ 通知内容は newRange（最後の日まで）
+    ================================ */
+    const notifyText = formatSchedule(newRange);
+
+    await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
+
+    /* ===============================
+       ★ 保存（newSchedule 全体）
+    ================================ */
     const saveData = {
       schedule: newSchedule,
       noSchedule: false,
       lastNoticeTime: getJSTTime()
     };
     fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
-
-    const lastIndex = getLastWorkingIndex(newFuture);
-    const notifyList = marked.slice(0, lastIndex + 1);
-
-    const scheduleText = formatSchedule(notifyList);
-
-    await sendDiscord(`【出勤表更新】${cast.name}\n\n${scheduleText}`);
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
