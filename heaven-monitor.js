@@ -108,9 +108,20 @@ function getLastWorkingIndex(schedule) {
 =============================== */
 function filterFuture(schedule) {
   const today = new Date();
-  const todayStr = `${today.getMonth() + 1}/${today.getDate()}`;
+  const todayY = today.getFullYear();
+  const todayM = today.getMonth() + 1;
+  const todayD = today.getDate();
 
-  return schedule.filter(s => normalizeDate(s.date) >= todayStr);
+  return schedule.filter(s => {
+    // "7/23(木)" → "7/23"
+    const dateStr = s.date.replace(/\(.+\)/, "");
+    const [m, d] = dateStr.split("/").map(Number);
+
+    const sDate = new Date(todayY, m - 1, d);
+    const todayDate = new Date(todayY, todayM - 1, todayD);
+
+    return sDate >= todayDate;
+  });
 }
 
 /* ===============================
