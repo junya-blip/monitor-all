@@ -7,8 +7,6 @@ const path = require('path');
 =============================== */
 function getJSTTime() {
   const now = new Date();
-
-  // UTC → JST（+9時間）
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
   const yyyy = jst.getUTCFullYear();
@@ -22,6 +20,9 @@ function getJSTTime() {
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
 
+/* ===============================
+   Discord通知
+=============================== */
 async function sendDiscord(message) {
   try {
     await axios.post(process.env.DISCORD_WEBHOOK_URL, {
@@ -32,41 +33,34 @@ async function sendDiscord(message) {
   }
 }
 
-
 /* ===============================
-   ピックアップ奥様取得
+   ピックアップ奥様取得（新仕様）
 =============================== */
 async function fetchPickup() {
-  const url = 'https://www.aventure-uh.jp/umeda/top/';
-  const html = await axios.get(url);
-  let text = html.data;
+  const url = 'https://www.aventure-uh.jp/umeda/girls/?data[pickup]=Y';
 
-  text = text.replace(/<[^>]*>/g, '');
+  const res = await axios.get(url);
+  const html = res.data;
 
-  const blockMatch = text.match(/対象奥様はこちら♪([\s\S]*?)※出勤状況により/);
-  const block = blockMatch ? blockMatch[1] : '';
+  // 改行を除去して扱いやすくする
+  const text = html.replace(/\n/g, '');
 
-  const rawMatches = block.match(/『([^』]+)』奥様/g) || [];
-  let names = [];
+  // 名前＋年齢抽出：<span class="name"><a>あやか(34)</a></span>
+  const nameMatches = [...text.matchAll(/<span class="name">.*?<a[^>]*>(.*?)<\/a>/g)];
 
-  for (const m of rawMatches) {
-    const inside = m.replace(/『|』奥様/g, '');
-    const parts = inside.split('・');
-    names.push(...parts);
-  }
+  let names = nameMatches.map(m => m[1].trim());  // 「あやか(34)」をそのまま使う
 
-  names = names.map(n => n.trim().replace(/\s+/g, ''));
-  names = [...new Set(names)];
-  names.sort();
+  // 重複除去 & ソート
+  names = [...new Set(names)].sort();
 
-  const periodMatch = text.match(/\d+\/\d+\(.+?\)～\d+\/\d+\(.+?\)/);
-  const period = periodMatch ? periodMatch[0].replace(/\s+/g, '') : '';
+  // 期間はこのページに存在しないため空欄
+  const period = '';
 
   return { period, names };
 }
 
 /* ===============================
-   LINE通知
+   LINE通知（未使用）
 =============================== */
 async function sendLine(message) {
   await axios.post(
@@ -155,10 +149,8 @@ module.exports = async function () {
 
     const msg =
       `【ピックアップ奥様更新】\n` +
-      `${data.period}\n` +
       `${data.names.join('\n')}`;
 
-    //await sendLine(msg);
     await sendDiscord(msg);
 
     saveLast(saveFile, data.period, data.names, getJSTTime());

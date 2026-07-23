@@ -111,12 +111,20 @@ app.get("/dashboard", (req, res) => {
     <h1>📊 Monitor Dashboard</h1>
     <p>最終更新: ${getJSTTime()}</p>
 
-    <div class="box">
-      <h2>アバンチュール-ピックアップ奥様</h2>
-      <p>期間: ${pickup.period || "-"}</p>
-      <p>対象奥様: ${pickup.names?.join(", ") || "-"}</p>
-      <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
-    </div>
+	<div class="box">
+	  <h2>アバンチュール-ピックアップ奥様</h2>
+
+	  <!-- 期間は新仕様では存在しないため非表示 -->
+	  <p>対象奥様:</p>
+
+	  <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">
+	${pickup.names && pickup.names.length > 0
+	  ? pickup.names.join("\n")
+	  : "-"}
+	  </pre>
+
+	  <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
+	</div>
 
     <div class="box">
       <h2>アバンチュール-オキニ出勤情報</h2>
