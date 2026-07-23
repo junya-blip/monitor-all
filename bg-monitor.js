@@ -27,7 +27,7 @@ function getJSTTime() {
 }
 
 /* ===============================
-   Discord通知（送るだけ）
+   Discord通知
 =============================== */
 async function sendDiscord(message) {
   try {
@@ -61,14 +61,14 @@ function containsCastName(title) {
 }
 
 /* ===============================
-   正規化（軽め）
+   正規化
 =============================== */
 function normalize(text) {
   return (text || "").trim();
 }
 
 /* ===============================
-   ヒットの正規化（差分判定を弱める）
+   ヒットの正規化
 =============================== */
 function normalizeHit(hit) {
   return {
@@ -93,7 +93,7 @@ function uniqueHits(hits) {
 }
 
 /* ===============================
-   LINE通知（来月復活用）
+   LINE通知（未使用）
 =============================== */
 async function sendLine(hit) {
   const noticeText = [
@@ -108,12 +108,7 @@ async function sendLine(hit) {
     "https://api.line.me/v2/bot/message/push",
     {
       to: USER_ID,
-      messages: [
-        {
-          type: "text",
-          text: noticeText
-        }
-      ]
+      messages: [{ type: "text", text: noticeText }]
     },
     {
       headers: {
@@ -215,7 +210,7 @@ function saveLast(data) {
 }
 
 /* ===============================
-   lastNotice.json（複数件対応版）
+   lastNotice.json 読み書き
 =============================== */
 function loadLastNotice() {
   const file = path.join(__dirname, "data", "bg-lastNotice.json");
@@ -242,7 +237,7 @@ function saveLastNotice(notices) {
 }
 
 /* ===============================
-   メイン処理（WebService用）
+   メイン処理
 =============================== */
 module.exports = async function () {
   console.log("bg-monitor 開始:", getJSTTime());
@@ -272,7 +267,7 @@ module.exports = async function () {
   );
 
   /* ===============================
-     差分なしでも return しない
+     差分なし
   ================================ */
   if (diff.length === 0) {
     console.log("差分なし → 通知なし");
@@ -281,6 +276,15 @@ module.exports = async function () {
       KEYWORDS.some(k => hit.keyword.includes(k))
     );
     saveLast(activeHits);
+
+    /* ===============================
+       ★ ヒット数が 0 のとき → ダッシュボードをクリア
+    ================================ */
+    if (activeHits.length === 0) {
+      console.log("ヒットなし → ダッシュボードをクリア");
+
+      saveLastNotice([]);  // notices = []
+    }
 
   } else {
     console.log(`差分あり → ${diff.length} 件`);
@@ -328,13 +332,9 @@ module.exports = async function () {
 
       const mergedList = [...(lastNotice.notices || []), ...noticeList];
 
-      // ★ noticeList が空でも保存する（lastNoticeTime を更新する）
       saveLastNotice(mergedList.length > 0 ? mergedList : lastNotice.notices);
     }
   }
 
-  /* ===============================
-     ★ 完了ログを必ず出す
-  ================================ */
   console.log("bg-monitor 完了:", getJSTTime());
 };
