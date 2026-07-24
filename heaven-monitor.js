@@ -39,15 +39,15 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化（不可視文字完全除去版）
+   正規化（不可視文字完全除去）
 =============================== */
 function normalizeTime(t) {
   if (!t) return "-";
   return t
     .replace(/&nbsp;/g, "")
-    .replace(/\u00A0/g, "")            // NBSP
-    .replace(/[\u2000-\u200F]/g, "")   // Unicode不可視文字
-    .replace(/[–—−]/g, "-")           // en/em/minus dash → "-"
+    .replace(/\u00A0/g, "")
+    .replace(/[\u2000-\u200F]/g, "")
+    .replace(/[–—−]/g, "-")
     .replace(/\s+/g, "")
     .replace(/〜|～/g, "-")
     .trim();
@@ -55,9 +55,9 @@ function normalizeTime(t) {
 
 function normalizeDate(d) {
   return d
-    .replace(/\u00A0/g, "")            // NBSP
-    .replace(/[\u2000-\u200F]/g, "")   // Unicode不可視文字
-    .replace(/\(.+\)/, "")             // "(土)" "(日)" など除去
+    .replace(/\u00A0/g, "")
+    .replace(/[\u2000-\u200F]/g, "")
+    .replace(/\(.+\)/, "")
     .replace(/\s+/g, "")
     .trim();
 }
@@ -206,7 +206,7 @@ module.exports = async function () {
     }
 
     /* ===============================
-       最後の出勤日まで抽出
+       最後の出勤日まで抽出（通知用ではなく未来日抽出の材料）
     ================================ */
     const lastIndex = getLastWorkingIndex(newSchedule);
     const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : newSchedule;
@@ -227,15 +227,14 @@ module.exports = async function () {
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
     /* ===============================
-       通知内容は newRange（最後の日まで）
+       ★ 通知内容も newFuture に統一
     ================================ */
-    const notifyText = formatSchedule(newRange);
+    const notifyText = formatSchedule(newFuture);
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
     /* ===============================
-       ★ 保存（未来日だけ保存する）
-       → 過去日が消えても差分にならない
+       ★ 保存（未来日だけ保存）
     ================================ */
     const saveData = {
       schedule: newFuture,
