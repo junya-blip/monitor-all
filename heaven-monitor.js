@@ -57,7 +57,7 @@ function normalizeDate(d) {
   return d
     .replace(/\u00A0/g, "")
     .replace(/[\u2000-\u200F]/g, "")
-    .replace(/\(.+\)/, "")
+    .replace(/\([^)]*\)/g, "") // 括弧の中身が壊れていても丸ごと除去
     .replace(/\s+/g, "")
     .trim();
 }
@@ -73,8 +73,12 @@ function formatSchedule(schedule) {
    差分判定（未来日だけ比較）
 =============================== */
 function diffSchedule(newList, oldList) {
-  const oldMap = new Map(oldList.map(s => [normalizeDate(s.date), normalizeTime(s.time)]));
-  const newMap = new Map(newList.map(s => [normalizeDate(s.date), normalizeTime(s.time)]));
+  const oldMap = new Map(
+    oldList.map(s => [normalizeDate(s.date), normalizeTime(s.time)])
+  );
+  const newMap = new Map(
+    newList.map(s => [normalizeDate(s.date), normalizeTime(s.time)])
+  );
 
   const diffs = [];
 
@@ -179,7 +183,7 @@ module.exports = async function () {
 
     /* ===============================
        出勤予定なし判定
-    ================================ */
+=============================== */
     const allDash = newSchedule.every(s => normalizeTime(s.time) === "-");
     const oldAllDash =
       oldNoSchedule ||
@@ -206,14 +210,14 @@ module.exports = async function () {
     }
 
     /* ===============================
-       最後の出勤日まで抽出（通知用ではなく未来日抽出の材料）
-    ================================ */
+       最後の出勤日まで抽出（未来日抽出の材料）
+=============================== */
     const lastIndex = getLastWorkingIndex(newSchedule);
     const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : newSchedule;
 
     /* ===============================
-       ★ 過去日を除外（未来日だけ比較）
-    ================================ */
+       過去日を除外（未来日だけ比較）
+=============================== */
     const oldFuture = filterFuture(oldSchedule);
     const newFuture = filterFuture(newRange);
 
@@ -227,24 +231,25 @@ module.exports = async function () {
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
     /* ===============================
-       ★ 通知内容も newFuture に統一
-    ================================ */
-    const notifyText = formatSchedule(newFuture);
+       通知内容も newFuture に統一
+=============================== */
+    const normalizedFuture = newFuture.map(s => ({
+      date: normalizeDate(s.date),
+      time: normalizeTime(s.time)
+    }));
+    const notifyText = formatSchedule(normalizedFuture);
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
-	/* ===============================
-	   ★ 保存（未来日だけ＋正規化して保存）
-	=============================== */
-	const saveData = {
-	  schedule: newFuture.map(s => ({
-	    date: normalizeDate(s.date),
-	    time: normalizeTime(s.time)
-	  })),
-	  noSchedule: false,
-	  lastNoticeTime: getJSTTime()
-	};
-	fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+    /* ===============================
+       保存（未来日だけ＋正規化して保存）
+=============================== */
+    const saveData = {
+      schedule: normalizedFuture,
+      noSchedule: false,
+      lastNoticeTime: getJSTTime()
+    };
+    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
