@@ -39,7 +39,7 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化（表記ゆれ吸収）
+   正規化
 =============================== */
 function normalizeTime(t) {
   if (!t) return "-";
@@ -58,14 +58,14 @@ function normalizeDate(d) {
 }
 
 /* ===============================
-   出勤予定整形（★マークは廃止）
+   出勤予定整形
 =============================== */
 function formatSchedule(schedule) {
   return schedule.map(s => `${s.date} ${s.time}`).join("\n");
 }
 
 /* ===============================
-   差分判定（集合比較）
+   差分判定（未来日だけ比較）
 =============================== */
 function diffSchedule(newList, oldList) {
   const oldMap = new Map(oldList.map(s => [normalizeDate(s.date), normalizeTime(s.time)]));
@@ -73,7 +73,6 @@ function diffSchedule(newList, oldList) {
 
   const diffs = [];
 
-  // new にある日付 → 追加 or 時間変更
   for (const [date, time] of newMap.entries()) {
     if (!oldMap.has(date)) {
       diffs.push({ date, time, type: "added" });
@@ -82,7 +81,6 @@ function diffSchedule(newList, oldList) {
     }
   }
 
-  // old にあるが new にない日付 → 削除
   for (const [date, time] of oldMap.entries()) {
     if (!newMap.has(date)) {
       diffs.push({ date, time, type: "removed" });
@@ -107,7 +105,7 @@ function getLastWorkingIndex(schedule) {
 }
 
 /* ===============================
-   過去日を除外
+   過去日を除外（未来日だけ残す）
 =============================== */
 function filterFuture(schedule) {
   const today = new Date();
@@ -116,7 +114,6 @@ function filterFuture(schedule) {
   const todayD = today.getDate();
 
   return schedule.filter(s => {
-    // "7/23(木)" → "7/23"
     const dateStr = s.date.replace(/\(.+\)/, "");
     const [m, d] = dateStr.split("/").map(Number);
 
@@ -128,7 +125,7 @@ function filterFuture(schedule) {
 }
 
 /* ===============================
-   出勤表取得（1か月分）
+   出勤表取得
 =============================== */
 async function fetchSchedule(url) {
   const res = await axios.get(url, {
@@ -176,7 +173,7 @@ module.exports = async function () {
     }
 
     /* ===============================
-       ★ 全日 "-" の特別判定（出勤予定なし）
+       出勤予定なし判定
     ================================ */
     const allDash = newSchedule.every(s => normalizeTime(s.time) === "-");
     const oldAllDash =
@@ -204,13 +201,13 @@ module.exports = async function () {
     }
 
     /* ===============================
-       ★ ヘブン側の「出勤予定が入っている最後の日」まで抽出
+       最後の出勤日まで抽出
     ================================ */
     const lastIndex = getLastWorkingIndex(newSchedule);
     const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : newSchedule;
 
     /* ===============================
-       ★ 過去日を除外して差分判定
+       ★ 過去日を除外（未来日だけ比較）
     ================================ */
     const oldFuture = filterFuture(oldSchedule);
     const newFuture = filterFuture(newRange);
@@ -225,21 +222,22 @@ module.exports = async function () {
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
     /* ===============================
-       ★ 通知内容は newRange（最後の日まで）
+       通知内容は newRange（最後の日まで）
     ================================ */
     const notifyText = formatSchedule(newRange);
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
     /* ===============================
-       ★ 保存（newSchedule 全体）
+       ★ 保存（未来日だけ保存する）
+       → 過去日が消えても差分にならない
     ================================ */
-	const saveData = {
-	  schedule: newRange,   // ★ newSchedule → newRange に変更
-	  noSchedule: false,
-	  lastNoticeTime: getJSTTime()
-	};
-	fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+    const saveData = {
+      schedule: newFuture,   // ★ newRange → newFuture に変更
+      noSchedule: false,
+      lastNoticeTime: getJSTTime()
+    };
+    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
