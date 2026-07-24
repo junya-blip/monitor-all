@@ -233,15 +233,18 @@ module.exports = async function () {
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
-    /* ===============================
-       ★ 保存（未来日だけ保存）
-    ================================ */
-    const saveData = {
-      schedule: newFuture,
-      noSchedule: false,
-      lastNoticeTime: getJSTTime()
-    };
-    fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+	/* ===============================
+	   ★ 保存（未来日だけ＋正規化して保存）
+	=============================== */
+	const saveData = {
+	  schedule: newFuture.map(s => ({
+	    date: normalizeDate(s.date),
+	    time: normalizeTime(s.time)
+	  })),
+	  noSchedule: false,
+	  lastNoticeTime: getJSTTime()
+	};
+	fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
   }
 
   console.log("heaven-monitor 完了:", getJSTTime());
