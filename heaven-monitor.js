@@ -39,14 +39,15 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化（強化版）
+   正規化（不可視文字完全除去版）
 =============================== */
 function normalizeTime(t) {
   if (!t) return "-";
   return t
     .replace(/&nbsp;/g, "")
-    .replace(/\u00A0/g, "")          // ★ NBSP 除去
-    .replace(/[–—−]/g, "-")          // ★ en/em/minus dash を "-" に統一
+    .replace(/\u00A0/g, "")            // NBSP
+    .replace(/[\u2000-\u200F]/g, "")   // Unicode不可視文字
+    .replace(/[–—−]/g, "-")           // en/em/minus dash → "-"
     .replace(/\s+/g, "")
     .replace(/〜|～/g, "-")
     .trim();
@@ -54,8 +55,9 @@ function normalizeTime(t) {
 
 function normalizeDate(d) {
   return d
-    .replace(/\u00A0/g, "")          // ★ NBSP 除去
-    .replace(/\(.+\)/, "")           // "(木)" "(金)" "(土)" を除去
+    .replace(/\u00A0/g, "")            // NBSP
+    .replace(/[\u2000-\u200F]/g, "")   // Unicode不可視文字
+    .replace(/\(.+\)/, "")             // "(土)" "(日)" など除去
     .replace(/\s+/g, "")
     .trim();
 }
