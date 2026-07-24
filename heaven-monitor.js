@@ -39,12 +39,14 @@ async function sendDiscord(message) {
 }
 
 /* ===============================
-   正規化
+   正規化（強化版）
 =============================== */
 function normalizeTime(t) {
   if (!t) return "-";
   return t
     .replace(/&nbsp;/g, "")
+    .replace(/\u00A0/g, "")          // ★ NBSP 除去
+    .replace(/[–—−]/g, "-")          // ★ en/em/minus dash を "-" に統一
     .replace(/\s+/g, "")
     .replace(/〜|～/g, "-")
     .trim();
@@ -52,7 +54,8 @@ function normalizeTime(t) {
 
 function normalizeDate(d) {
   return d
-    .replace(/\(.+\)/, "")  // "(木)" "(金)" "(土)" を除去
+    .replace(/\u00A0/g, "")          // ★ NBSP 除去
+    .replace(/\(.+\)/, "")           // "(木)" "(金)" "(土)" を除去
     .replace(/\s+/g, "")
     .trim();
 }
@@ -233,7 +236,7 @@ module.exports = async function () {
        → 過去日が消えても差分にならない
     ================================ */
     const saveData = {
-      schedule: newFuture,   // ★ newRange → newFuture に変更
+      schedule: newFuture,
       noSchedule: false,
       lastNoticeTime: getJSTTime()
     };
