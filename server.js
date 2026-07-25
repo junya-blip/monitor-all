@@ -256,9 +256,11 @@ ${pickup.names && pickup.names.length > 0
       <p>最新ヒット数: ${bg.length}</p>
 
       <pre>
-${Array.isArray(bgNotice.notices)
-  ? bgNotice.notices.map(n => linkify(n)).join("\n\n")
-  : linkify(bgNotice.lastNotice || "-")}
+		${bg.length > 0
+		  ? bg.map(n => linkify(
+		      `${n.date}\n${n.title} (${n.keyword})\n${n.shift}\n${n.url}`
+		    )).join("\n\n")
+		  : "-"}
       </pre>
 
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>

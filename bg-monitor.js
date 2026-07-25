@@ -93,33 +93,6 @@ function uniqueHits(hits) {
 }
 
 /* ===============================
-   LINE通知（未使用）
-=============================== */
-async function sendLine(hit) {
-  const noticeText = [
-    hit.date,
-    hit.title,
-    hit.keyword,
-    hit.shift,
-    hit.url
-  ].join("\n");
-
-  await axios.post(
-    "https://api.line.me/v2/bot/message/push",
-    {
-      to: USER_ID,
-      messages: [{ type: "text", text: noticeText }]
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
-}
-
-/* ===============================
    今日〜7日後までのURL生成
 =============================== */
 function buildUrls() {
@@ -237,7 +210,7 @@ function saveLastNotice(notices) {
 }
 
 /* ===============================
-   メイン処理
+   メイン処理（完全版）
 =============================== */
 module.exports = async function () {
   console.log("bg-monitor 開始:", getJSTTime());
@@ -275,14 +248,12 @@ module.exports = async function () {
     const activeHits = allHits.filter(hit =>
       KEYWORDS.some(k => hit.keyword.includes(k))
     );
+
+    // ★ サイトに残っているヒットだけを保存（古いものは消える）
     saveLast(activeHits);
 
-    /* ===============================
-       ★ ヒット数が 0 のとき → ダッシュボードをクリア
-    ================================ */
     if (activeHits.length === 0) {
       console.log("ヒットなし → ダッシュボードをクリア");
-
       saveLastNotice([]);  // notices = []
     }
 
@@ -328,6 +299,7 @@ module.exports = async function () {
         KEYWORDS.some(k => hit.keyword.includes(k))
       );
 
+      // ★ サイトに残っているヒットだけを保存（古いものは消える）
       saveLast(activeHits);
 
       const mergedList = [...(lastNotice.notices || []), ...noticeList];
