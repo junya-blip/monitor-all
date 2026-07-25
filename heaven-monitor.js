@@ -62,6 +62,20 @@ function normalizeDate(d) {
     .trim();
 }
 
+/*
+ * 表示・保存用の日付正規化
+ * 曜日は残し、余計な空白や不可視文字だけ除去する
+ */
+function normalizeDisplayDate(d) {
+  if (!d) return "";
+
+  return String(d)
+    .replace(/\u00A0/g, "")
+    .replace(/[\u2000-\u200F]/g, "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
 /* ===============================
    出勤予定整形
 =============================== */
@@ -254,15 +268,43 @@ module.exports = async function () {
 
     const diffs = diffSchedule(newFuture, oldFuture);
 
-    if (diffs.length === 0) {
-      console.log(`変更なし（未来分に変化なし）: ${cast.name}`);
-      continue;
-    }
+	if (diffs.length === 0) {
+	  console.log(`変更なし（未来分に変化なし）: ${cast.name}`);
+
+	  /*
+	   * 通知対象の変更はないが、曜日などの表示情報は最新状態で保存する。
+	   * lastNoticeTimeは変更しない。
+	   */
+	  const refreshedSchedule = newFuture.map(s => ({
+	    date: normalizeDisplayDate(s.date),
+	    time: normalizeTime(s.time)
+	  }));
+
+	  let previousLastNoticeTime = null;
+
+	  if (fs.existsSync(saveFile)) {
+	    try {
+	      const previousData = JSON.parse(fs.readFileSync(saveFile, "utf8"));
+	      previousLastNoticeTime = previousData.lastNoticeTime || null;
+	    } catch (e) {
+	      console.log(`既存データ読み込み失敗: ${cast.name}`, e.message);
+	    }
+	  }
+
+	  const saveData = {
+	    schedule: refreshedSchedule,
+	    noSchedule: false,
+	    lastNoticeTime: previousLastNoticeTime
+	  };
+
+	  fs.writeFileSync(saveFile, JSON.stringify(saveData, null, 2));
+	  continue;
+	}
 
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
     const normalizedFuture = newFuture.map(s => ({
-      date: normalizeDate(s.date),
+      date: normalizeDisplayDate(s.date),
       time: normalizeTime(s.time)
     }));
     const notifyText = formatSchedule(normalizedFuture);
