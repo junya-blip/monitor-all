@@ -117,7 +117,6 @@ function getLastWorkingIndex(schedule) {
    過去日を除外（JST基準で今日以降だけ残す）
 =============================== */
 function filterFuture(schedule) {
-  // RenderはUTCで動くため、明示的にJSTへ変換する
   const now = new Date();
   const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
 
@@ -125,11 +124,20 @@ function filterFuture(schedule) {
   const todayM = jst.getUTCMonth() + 1;
   const todayD = jst.getUTCDate();
 
-  // 比較しやすいように YYYYMMDD の数値へ変換
   const todayValue = todayY * 10000 + todayM * 100 + todayD;
 
   return schedule.filter(s => {
-    const dateStr = normalizeDate(s.date);
+    if (!s || !s.date) {
+      return false;
+    }
+
+    const dateStr = String(s.date)
+      .replace(/\u00A0/g, "")
+      .replace(/[\u2000-\u200F]/g, "")
+      .replace(/\([^)]*\)/g, "")
+      .replace(/\s+/g, "")
+      .trim();
+
     const [m, d] = dateStr.split("/").map(Number);
 
     if (!Number.isFinite(m) || !Number.isFinite(d)) {
@@ -137,16 +145,15 @@ function filterFuture(schedule) {
       return false;
     }
 
-    /*
-     * 出勤表には年がないため、現在年を基本とする。
-     * 12月に1月の予定が表示された場合は翌年として扱う。
-     * 1月に12月の古いデータが残った場合は前年として扱う。
-     */
     let scheduleY = todayY;
 
+    // 12月に表示される1月分は翌年
     if (todayM === 12 && m === 1) {
       scheduleY = todayY + 1;
-    } else if (todayM === 1 && m === 12) {
+    }
+
+    // 1月に残っている12月分は前年
+    if (todayM === 1 && m === 12) {
       scheduleY = todayY - 1;
     }
 
