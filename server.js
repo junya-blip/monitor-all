@@ -11,22 +11,45 @@ const heavenMonitor = require("./heaven-monitor.js");
 const yuuriMonitor = require("./yuuri-monitor.js");
 
 /* ===============================
-   過去日を除外（未来日だけ残す）
+   過去日を除外（JST基準で今日以降だけ残す）
 =============================== */
 function filterFuture(schedule) {
-  const today = new Date();
-  const todayY = today.getFullYear();
-  const todayM = today.getMonth() + 1;
-  const todayD = today.getDate();
+  // RenderはUTCで動くため、明示的にJSTへ変換する
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+
+  const todayY = jst.getUTCFullYear();
+  const todayM = jst.getUTCMonth() + 1;
+  const todayD = jst.getUTCDate();
+
+  // 比較しやすいように YYYYMMDD の数値へ変換
+  const todayValue = todayY * 10000 + todayM * 100 + todayD;
 
   return schedule.filter(s => {
-    const dateStr = s.date.replace(/\(.+\)/, "");
+    const dateStr = normalizeDate(s.date);
     const [m, d] = dateStr.split("/").map(Number);
 
-    const sDate = new Date(todayY, m - 1, d);
-    const todayDate = new Date(todayY, todayM - 1, todayD);
+    if (!Number.isFinite(m) || !Number.isFinite(d)) {
+      console.log(`日付解析失敗: ${s.date}`);
+      return false;
+    }
 
-    return sDate >= todayDate;
+    /*
+     * 出勤表には年がないため、現在年を基本とする。
+     * 12月に1月の予定が表示された場合は翌年として扱う。
+     * 1月に12月の古いデータが残った場合は前年として扱う。
+     */
+    let scheduleY = todayY;
+
+    if (todayM === 12 && m === 1) {
+      scheduleY = todayY + 1;
+    } else if (todayM === 1 && m === 12) {
+      scheduleY = todayY - 1;
+    }
+
+    const scheduleValue = scheduleY * 10000 + m * 100 + d;
+
+    return scheduleValue >= todayValue;
   });
 }
 
