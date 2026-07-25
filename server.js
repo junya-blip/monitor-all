@@ -255,13 +255,11 @@ ${pickup.names && pickup.names.length > 0
       <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
 
-      <pre>
-		${bg.length > 0
-		  ? bg.map(n => linkify(
-		      `${n.date}\n${n.title} (${n.keyword})\n${n.shift}\n${n.url}`
-		    )).join("\n\n")
-		  : "-"}
-      </pre>
+<pre>${bg.length > 0
+  ? bg.map(n => linkify(
+      `${n.date}\n${n.title} (${n.keyword})\n${n.shift}\n${n.url}`
+    )).join("\n\n")
+  : "-"}</pre>
 
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
     </div>
