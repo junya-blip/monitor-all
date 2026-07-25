@@ -186,6 +186,26 @@ app.get("/dashboard", (req, res) => {
     <h1>📊 Monitor Dashboard</h1>
     <p>最終更新: ${getJSTTime()}</p>
 
+    <!-- ピックアップ奥様（修正版） -->
+    <div class="box">
+      <h2>アバンチュール-ピックアップ奥様</h2>
+
+      <div class="heaven-grid" style="display:flex; gap:20px; flex-wrap:wrap;">
+        <div class="heaven-col" style="background:#333; padding:10px; border-radius:6px;">
+          <h3>対象奥様</h3>
+
+          <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">
+${pickup.names && pickup.names.length > 0
+  ? pickup.names.map(n => n.trim()).join("\n")
+  : "-"}
+          </pre>
+
+          <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- heaven-monitor -->
     <div class="box">
       <h2>アバンチュール-オキニ出勤情報</h2>
 
@@ -205,10 +225,7 @@ app.get("/dashboard", (req, res) => {
 
           const schedule = data.schedule || [];
 
-          // ★ 未来日だけ抽出
           const futureOnly = filterFuture(schedule);
-
-          // ★ 最後の出勤時間が入っている日まで抽出
           const lastIndex = getLastWorkingIndex(futureOnly);
           const visibleSchedule =
             lastIndex >= 0 ? futureOnly.slice(0, lastIndex + 1) : futureOnly;
@@ -233,6 +250,7 @@ app.get("/dashboard", (req, res) => {
       </div>
     </div>
 
+    <!-- bg-monitor -->
     <div class="box">
       <h2>ビギナーズ出勤アラート</h2>
       <p>最新ヒット数: ${bg.length}</p>
@@ -246,6 +264,7 @@ ${Array.isArray(bgNotice.notices)
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
     </div>
 
+    <!-- yuuri-monitor -->
     <div class="box">
       <h2>ゆうりちゃんの日記</h2>
       <p>タイトル: ${yuuri.title || "-"}</p>
