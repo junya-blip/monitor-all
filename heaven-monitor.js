@@ -57,7 +57,7 @@ function normalizeDate(d) {
   return d
     .replace(/\u00A0/g, "")
     .replace(/[\u2000-\u200F]/g, "")
-    .replace(/\([^)]*\)/g, "") // 括弧の中身が壊れていても丸ごと除去
+    .replace(/\([^)]*\)/g, "")
     .replace(/\s+/g, "")
     .trim();
 }
@@ -97,20 +97,6 @@ function diffSchedule(newList, oldList) {
   }
 
   return diffs;
-}
-
-/* ===============================
-   最後の出勤日 index
-=============================== */
-function getLastWorkingIndex(schedule) {
-  let lastIndex = -1;
-  schedule.forEach((s, i) => {
-    const t = normalizeTime(s.time);
-    if (t !== "-" && t !== "") {
-      lastIndex = i;
-    }
-  });
-  return lastIndex;
 }
 
 /* ===============================
@@ -210,16 +196,10 @@ module.exports = async function () {
     }
 
     /* ===============================
-       最後の出勤日まで抽出（未来日抽出の材料）
-=============================== */
-    const lastIndex = getLastWorkingIndex(newSchedule);
-    const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : newSchedule;
-
-    /* ===============================
-       過去日を除外（未来日だけ比較）
+       未来日だけ抽出（newRange 廃止）
 =============================== */
     const oldFuture = filterFuture(oldSchedule);
-    const newFuture = filterFuture(newRange);
+    const newFuture = filterFuture(newSchedule);
 
     const diffs = diffSchedule(newFuture, oldFuture);
 
@@ -230,9 +210,6 @@ module.exports = async function () {
 
     console.log(`変更あり（未来分に変化）: ${cast.name}`);
 
-    /* ===============================
-       通知内容も newFuture に統一
-=============================== */
     const normalizedFuture = newFuture.map(s => ({
       date: normalizeDate(s.date),
       time: normalizeTime(s.time)
@@ -241,9 +218,6 @@ module.exports = async function () {
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
-    /* ===============================
-       保存（未来日だけ＋正規化して保存）
-=============================== */
     const saveData = {
       schedule: normalizedFuture,
       noSchedule: false,
