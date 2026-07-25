@@ -100,6 +100,20 @@ function diffSchedule(newList, oldList) {
 }
 
 /* ===============================
+   最後の出勤日 index（time が "-" 以外）
+=============================== */
+function getLastWorkingIndex(schedule) {
+  let lastIndex = -1;
+  schedule.forEach((s, i) => {
+    const t = normalizeTime(s.time);
+    if (t !== "-" && t !== "") {
+      lastIndex = i;
+    }
+  });
+  return lastIndex;
+}
+
+/* ===============================
    過去日を除外（未来日だけ残す）
 =============================== */
 function filterFuture(schedule) {
@@ -196,10 +210,17 @@ module.exports = async function () {
     }
 
     /* ===============================
-       未来日だけ抽出（newRange 廃止）
+       ★ 仕様どおり：最後の出勤時間が入っている日まで抽出
+=============================== */
+    const lastIndex = getLastWorkingIndex(newSchedule);
+    const newRange =
+      lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : [];
+
+    /* ===============================
+       過去日を除外（未来日だけ比較）
 =============================== */
     const oldFuture = filterFuture(oldSchedule);
-    const newFuture = filterFuture(newSchedule);
+    const newFuture = filterFuture(newRange);
 
     const diffs = diffSchedule(newFuture, oldFuture);
 
