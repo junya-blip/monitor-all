@@ -216,25 +216,86 @@ app.get("/dashboard", (req, res) => {
     <h1>📊 Monitor Dashboard</h1>
     <p>最終更新: ${getJSTTime()}</p>
 
-    <!-- ピックアップ奥様（修正版） -->
+    <!-- ピックアップ奥様 -->
     <div class="box">
       <h2>アバンチュール-ピックアップ奥様</h2>
 
-      <div class="heaven-grid" style="display:flex; gap:20px; flex-wrap:wrap;">
-        <div class="heaven-col" style="background:#333; padding:10px; border-radius:6px;">
-          <h3>対象奥様</h3>
+      ${
+        (() => {
+          /*
+           * 新旧どちらのpickup-last.jsonでも
+           * ダッシュボードを表示できるようにする。
+           */
+          const currentPickup = pickup.current || {
+            period: pickup.period || "",
+            names: Array.isArray(pickup.names)
+              ? pickup.names
+              : []
+          };
 
-          <pre style="white-space: pre-wrap; color:#ccc; font-size:16px; line-height:1.6;">
-${pickup.names && pickup.names.length > 0
-  ? pickup.names.map(n => n.trim()).join("\n")
-  : "-"}
-          </pre>
+          const nextPickup = pickup.next || {
+            period: "",
+            names: []
+          };
 
-          <p>最終通知: ${pickup.lastNoticeTime || "-"}</p>
-        </div>
-      </div>
+			const renderPickupSection = data => {
+			  const names =
+			    Array.isArray(data.names) &&
+			    data.names.length > 0
+			      ? data.names
+			          .map(name => name.trim())
+			          .join("\n")
+			      : "-";
+
+			  return `
+			    ${
+			      data.period
+			        ? `<div style="font-weight:bold;">${data.period}</div>`
+			        : ""
+			    }
+			    <pre
+			      style="
+			        white-space:pre-wrap;
+			        color:#ccc;
+			        font-size:16px;
+			        line-height:1.6;
+			        margin:0;
+			      "
+			    >${names}</pre>
+			  `;
+			};
+
+			return `
+			  <div
+			    style="
+			      background:#333;
+			      padding:15px;
+			      border-radius:6px;
+			    "
+			  >
+			    ${renderPickupSection(currentPickup)}
+
+			    ${
+			      nextPickup.names &&
+			      nextPickup.names.length > 0
+			        ? `
+			          <div style="margin-top:18px;">
+			            ${renderPickupSection(nextPickup)}
+			          </div>
+			        `
+			        : ""
+			    }
+			  </div>
+
+			  <p>
+			    最終通知:
+			    ${pickup.lastNoticeTime || "-"}
+			  </p>
+			`;
+        })()
+      }
     </div>
-
+    
     <!-- heaven-monitor -->
     <div class="box">
       <h2>アバンチュール-オキニ出勤情報</h2>
