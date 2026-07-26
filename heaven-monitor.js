@@ -78,9 +78,47 @@ function normalizeDisplayDate(d) {
 
 /* ===============================
    出勤予定整形
+   差分がある日付の行頭に「★」を付ける
 =============================== */
-function formatSchedule(schedule) {
-  return schedule.map(s => `${s.date} ${s.time}`).join("\n");
+function formatSchedule(schedule, diffs = [], oldSchedule = []) {
+  /*
+   * 追加・時間変更された日付
+   */
+  const changedDates = new Set(
+    diffs
+      .filter(diff =>
+        diff.type === "added" ||
+        diff.type === "changed"
+      )
+      .map(diff => normalizeDate(diff.date))
+  );
+
+  const lines = schedule.map(item => {
+    const dateKey = normalizeDate(item.date);
+    const mark = changedDates.has(dateKey) ? "★" : "";
+
+    return `${mark}${item.date} ${item.time}`;
+  });
+
+  /*
+   * 新しい出勤表から日付自体が消えた場合は、
+   * 現在の一覧に行が存在しないため末尾へ「削除」と表示する。
+   */
+  const removedLines = diffs
+    .filter(diff => diff.type === "removed")
+    .map(diff => {
+      const oldItem = oldSchedule.find(
+        item =>
+          normalizeDate(item.date) ===
+          normalizeDate(diff.date)
+      );
+
+      const displayDate = oldItem?.date || diff.date;
+
+      return `★${displayDate} 削除`;
+    });
+
+  return [...lines, ...removedLines].join("\n");
 }
 
 /* ===============================
@@ -307,7 +345,12 @@ module.exports = async function () {
       date: normalizeDisplayDate(s.date),
       time: normalizeTime(s.time)
     }));
-    const notifyText = formatSchedule(normalizedFuture);
+
+	const notifyText = formatSchedule(
+	  normalizedFuture,
+	  diffs,
+	  oldFuture
+	);
 
     await sendDiscord(`【出勤表更新】${cast.name}\n\n${notifyText}`);
 
