@@ -121,6 +121,16 @@ function uniqueNames(names) {
 }
 
 /* ===============================
+   年齢を除いた名前を比較用に整形
+   例：さつき(40) → さつき
+=============================== */
+function normalizePickupName(name) {
+  return normalizeText(name)
+    .replace(/[（(]\s*\d+\s*[）)]$/, "")
+    .trim();
+}
+
+/* ===============================
    今週のピックアップ取得
 =============================== */
 async function fetchCurrentPickup() {
@@ -415,7 +425,7 @@ module.exports = async function () {
 
   const last = loadLast(saveFile);
 
-  const current = await fetchCurrentPickup();
+  let current = await fetchCurrentPickup();
 
   /*
    * 今週ページが一時的に空だった場合、
@@ -436,17 +446,66 @@ module.exports = async function () {
 
   const fetchedNext = await fetchNextPickup();
 
-  /*
-   * 次週ページの通信失敗時は、
-   * 前回保存した次週情報を維持する。
-   *
-   * 正常に取得できて「情報なし」だった場合は
-   * 空データに更新する。
-   */
-  const next =
-    fetchedNext === null
-      ? last.next
-      : fetchedNext;
+	let next =
+	  fetchedNext === null
+	    ? last.next
+	    : fetchedNext;
+
+	/*
+	 * 一覧ページがすでに次週分へ更新されていて、
+	 * トップページにも同じ対象者が掲載されている場合の整理。
+	 *
+	 * 一覧ページ：
+	 *   さつき(40)
+	 *
+	 * トップページ：
+	 *   さつき
+	 *
+	 * のような組み合わせでも同一人物として判定する。
+	 */
+	if (
+	  fetchedNext !== null &&
+	  current.names.length > 0 &&
+	  next.names.length > 0
+	) {
+	  const currentNameSet = new Set(
+	    current.names.map(normalizePickupName)
+	  );
+
+	  const duplicateNames = next.names.filter(name =>
+	    currentNameSet.has(normalizePickupName(name))
+	  );
+
+	  /*
+	   * トップページ側の全員が一覧ページ側に含まれている場合、
+	   * 一覧ページが次週分へ切り替わったと判断する。
+	   */
+	  const isSameNextWeek =
+	    duplicateNames.length === next.names.length;
+
+	  if (isSameNextWeek) {
+	    console.log(
+	      "一覧ページとトップページの対象者が重複 → 一覧ページを次週分として採用"
+	    );
+
+	    /*
+	     * 一覧ページでは期間を取得できないため、
+	     * トップページから取得した次週期間を使用する。
+	     */
+	    current = {
+	      period: next.period,
+	      names: current.names
+	    };
+
+	    /*
+	     * 二重表示を防ぐため、トップページ側は空にする。
+	     */
+	    next = {
+	      period: "",
+	      names: []
+	    };
+	  }
+	}
 
   const newData = {
     current,
