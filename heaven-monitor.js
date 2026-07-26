@@ -77,10 +77,56 @@ function normalizeDisplayDate(d) {
 }
 
 /* ===============================
+   M/D形式の日付を比較用タイムスタンプへ変換
+=============================== */
+function scheduleDateToTimestamp(dateText) {
+  const normalized = normalizeDate(dateText);
+
+  const match = normalized.match(
+    /^(\d{1,2})\/(\d{1,2})$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+
+  const now = new Date();
+  const jst = new Date(
+    now.getTime() + 9 * 60 * 60 * 1000
+  );
+
+  let year = jst.getUTCFullYear();
+  const currentMonth = jst.getUTCMonth() + 1;
+
+  /*
+   * 年末に翌年1月・2月が掲載された場合
+   */
+  if (currentMonth >= 11 && month <= 2) {
+    year += 1;
+  }
+
+  /*
+   * 年始に前年12月が残っている場合
+   */
+  if (currentMonth <= 2 && month >= 11) {
+    year -= 1;
+  }
+
+  return Date.UTC(year, month - 1, day);
+}
+
+/* ===============================
    出勤予定整形
    差分がある日付の行頭に「★」を付ける
 =============================== */
-function formatSchedule(schedule, diffs = [], oldSchedule = []) {
+function formatSchedule(
+  schedule,
+  diffs = [],
+  oldSchedule = []
+) {
   /*
    * 追加・時間変更された日付
    */
@@ -90,19 +136,44 @@ function formatSchedule(schedule, diffs = [], oldSchedule = []) {
         diff.type === "added" ||
         diff.type === "changed"
       )
-      .map(diff => normalizeDate(diff.date))
+      .map(diff =>
+        normalizeDate(diff.date)
+      )
   );
 
   const lines = schedule.map(item => {
     const dateKey = normalizeDate(item.date);
-    const mark = changedDates.has(dateKey) ? "★" : "";
+
+    const mark =
+      changedDates.has(dateKey)
+        ? "★"
+        : "";
 
     return `${mark}${item.date} ${item.time}`;
   });
 
   /*
-   * 新しい出勤表から日付自体が消えた場合は、
-   * 現在の一覧に行が存在しないため末尾へ「削除」と表示する。
+   * 今回表示されている最後の日付
+   */
+  const latestNewDate = schedule.reduce(
+    (latest, item) => {
+      const value =
+        scheduleDateToTimestamp(item.date);
+
+      if (value === null) {
+        return latest;
+      }
+
+      return latest === null ||
+        value > latest
+        ? value
+        : latest;
+    },
+    null
+  );
+
+  /*
+   * 削除表示は、今回の最終日以前だけ
    */
   const removedLines = diffs
     .filter(diff => diff.type === "removed")
@@ -113,12 +184,26 @@ function formatSchedule(schedule, diffs = [], oldSchedule = []) {
           normalizeDate(diff.date)
       );
 
-      const displayDate = oldItem?.date || diff.date;
+      const displayDate =
+        oldItem?.date || diff.date;
+
+      const removedDate =
+        scheduleDateToTimestamp(displayDate);
+
+      if (
+        removedDate === null ||
+        latestNewDate === null ||
+        removedDate > latestNewDate
+      ) {
+        return null;
+      }
 
       return `★${displayDate} 削除`;
-    });
+    })
+    .filter(Boolean);
 
-  return [...lines, ...removedLines].join("\n");
+  return [...lines, ...removedLines]
+    .join("\n");
 }
 
 /* ===============================
