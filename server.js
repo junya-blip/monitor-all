@@ -4,6 +4,11 @@ const app = express();
 const fs = require("fs");
 const path = require("path");
 
+const {
+  getJSTDate,
+  getJSTTime
+} = require("./common/time");
+
 // 各 monitor の読み込み
 const pickupMonitor = require("./pickup-monitor.js");
 const bgMonitor = require("./bg-monitor.js");
@@ -14,14 +19,16 @@ const yuuriMonitor = require("./yuuri-monitor.js");
    過去日を除外（JST基準で今日以降だけ残す）
 =============================== */
 function filterFuture(schedule) {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const jst = getJSTDate();
 
   const todayY = jst.getUTCFullYear();
   const todayM = jst.getUTCMonth() + 1;
   const todayD = jst.getUTCDate();
 
-  const todayValue = todayY * 10000 + todayM * 100 + todayD;
+  const todayValue =
+    todayY * 10000 +
+    todayM * 100 +
+    todayD;
 
   return schedule.filter(s => {
     if (!s || !s.date) {
@@ -35,26 +42,41 @@ function filterFuture(schedule) {
       .replace(/\s+/g, "")
       .trim();
 
-    const [m, d] = dateStr.split("/").map(Number);
+    const [m, d] =
+      dateStr.split("/").map(Number);
 
-    if (!Number.isFinite(m) || !Number.isFinite(d)) {
-      console.log(`日付解析失敗: ${s.date}`);
+    if (
+      !Number.isFinite(m) ||
+      !Number.isFinite(d)
+    ) {
+      console.log(
+        `日付解析失敗: ${s.date}`
+      );
       return false;
     }
 
     let scheduleY = todayY;
 
     // 12月に表示される1月分は翌年
-    if (todayM === 12 && m === 1) {
+    if (
+      todayM === 12 &&
+      m === 1
+    ) {
       scheduleY = todayY + 1;
     }
 
     // 1月に残っている12月分は前年
-    if (todayM === 1 && m === 12) {
+    if (
+      todayM === 1 &&
+      m === 12
+    ) {
       scheduleY = todayY - 1;
     }
 
-    const scheduleValue = scheduleY * 10000 + m * 100 + d;
+    const scheduleValue =
+      scheduleY * 10000 +
+      m * 100 +
+      d;
 
     return scheduleValue >= todayValue;
   });
@@ -83,24 +105,6 @@ function safeLoad(filename) {
   } catch {
     return {};
   }
-}
-
-/* ===============================
-   JST 時刻
-=============================== */
-function getJSTTime() {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-
-  const yyyy = jst.getUTCFullYear();
-  const mm = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(jst.getUTCDate()).padStart(2, "0");
-
-  const hh = String(jst.getUTCHours()).padStart(2, "0");
-  const mi = String(jst.getUTCMinutes()).padStart(2, "0");
-  const ss = String(jst.getUTCSeconds()).padStart(2, "0");
-
-  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
 }
 
 /* ===============================

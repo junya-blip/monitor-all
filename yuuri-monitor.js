@@ -3,47 +3,25 @@ const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
 
-const TOKEN = process.env.LINE_TOKEN;
-const USER_ID = process.env.LINE_USER_ID;
+const {
+  notify
+} = require("./common/notifier");
 
-/* ===============================
-   JST固定の時刻
-=============================== */
-function getJSTTime() {
-  const now = new Date();
+const {
+  getJSTTime
+} = require("./common/time");
 
-  // UTC → JST（+9時間）
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+const DIARY_URL =
+  "https://fukuharaso-pu.com/beginnerskobe/yuuri4/photodiary/";
 
-  const yyyy = jst.getUTCFullYear();
-  const mm = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(jst.getUTCDate()).padStart(2, "0");
-
-  const hh = String(jst.getUTCHours()).padStart(2, "0");
-  const mi = String(jst.getUTCMinutes()).padStart(2, "0");
-  const ss = String(jst.getUTCSeconds()).padStart(2, "0");
-
-  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
-}
-
-/* ===============================
-   Discord通知（送るだけ）
-=============================== */
-async function sendDiscord(message) {
-  try {
-    await axios.post(process.env.DISCORD_WEBHOOK_URL, {
-      content: message
-    });
-  } catch (err) {
-    console.error("Discord通知エラー:", err.response?.data || err);
-  }
-}
+const BASE_URL =
+  "https://fukuharaso-pu.com";
 
 /* ===============================
    正規化（揺れ対策）
 =============================== */
 function normalize(text) {
-  return (text || "")
+  return String(text || "")
     .replace(/\s+/g, "")
     .replace(/　+/g, "")
     .trim();
@@ -53,49 +31,123 @@ function normalize(text) {
    最新投稿を取得
 =============================== */
 async function getLatestPost() {
-  const url = "https://fukuharaso-pu.com/beginnerskobe/yuuri4/photodiary/";
-  const res = await axios.get(url);
-  const $ = cheerio.load(res.data);
-
-  const post = $(".diary_cont").first();
-  if (!post || post.length === 0) {
-    console.log("最新投稿が取得できませんでした");
-    return { title: null, link: null };
-  }
-
-  const titleElem = post.find(".tit a");
-  const title = titleElem.length ? titleElem.text().trim() : null;
-  const link = titleElem.length ? titleElem.attr("href") : null;
-
-  return { title, link };
-}
-
-/* ===============================
-   last.json 読み書き
-=============================== */
-function loadLast() {
-  const file = path.join(__dirname, "data", "yuuri-last.json");
   try {
-    const raw = fs.readFileSync(file, "utf-8");
-    const data = JSON.parse(raw);
+    const res = await axios.get(
+      DIARY_URL,
+      {
+        timeout: 20000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        }
+      }
+    );
+
+    const $ = cheerio.load(res.data);
+
+    const post =
+      $(".diary_cont").first();
+
+    if (post.length === 0) {
+      console.log(
+        "最新投稿の要素が取得できませんでした"
+      );
+
+      return null;
+    }
+
+    const titleElem =
+      post.find(".tit a").first();
+
+    const title =
+      titleElem.text().trim();
+
+    const link =
+      titleElem.attr("href");
+
+    if (!title || !link) {
+      console.log(
+        "最新投稿のタイトルまたはURLを取得できませんでした"
+      );
+
+      return null;
+    }
 
     return {
-      title: data.title || null,
-      link: data.link || null,
-      lastNoticeTime: data.lastNoticeTime || null
+      title,
+      link
     };
-  } catch {
-    return { title: null, link: null, lastNoticeTime: null };
+  } catch (err) {
+    console.error(
+      "最新投稿取得エラー:",
+      err.response?.status ||
+        err.message ||
+        err
+    );
+
+    return null;
   }
 }
 
-function saveLast(data) {
-  const file = path.join(__dirname, "data", "yuuri-last.json");
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+/* ===============================
+   last.json 読み込み
+=============================== */
+function loadLast() {
+  const file = path.join(
+    __dirname,
+    "data",
+    "yuuri-last.json"
+  );
+
+  try {
+    const raw = fs.readFileSync(
+      file,
+      "utf-8"
+    );
+
+    const data =
+      JSON.parse(raw);
+
+    return {
+      title:
+        data.title || null,
+      link:
+        data.link || null,
+      lastNoticeTime:
+        data.lastNoticeTime || null
+    };
+  } catch {
+    return {
+      title: null,
+      link: null,
+      lastNoticeTime: null
+    };
+  }
 }
 
 /* ===============================
-   差分判定（強化版）
+   last.json 保存
+=============================== */
+function saveLast(data) {
+  const file = path.join(
+    __dirname,
+    "data",
+    "yuuri-last.json"
+  );
+
+  fs.writeFileSync(
+    file,
+    JSON.stringify(
+      data,
+      null,
+      2
+    )
+  );
+}
+
+/* ===============================
+   差分判定
 =============================== */
 function isDifferent(a, b) {
   const aNorm = {
@@ -108,87 +160,137 @@ function isDifferent(a, b) {
     link: normalize(b.link)
   };
 
-  return JSON.stringify(aNorm) !== JSON.stringify(bNorm);
-}
-
-/* ===============================
-   LINE通知（来月復活用）
-=============================== */
-async function sendLine(post) {
-  const fullUrl = post.link
-    ? "https://fukuharaso-pu.com" + post.link
-    : "URL取得失敗";
-
-  const titleText = post.title || "タイトル取得失敗";
-
-  await axios.post(
-    "https://api.line.me/v2/bot/message/push",
-    {
-      to: USER_ID,
-      messages: [
-        {
-          type: "text",
-          text:
-            `ゆうりちゃんの日記が更新されました！\n\n` +
-            `タイトル: ${titleText}\n\n` +
-            `URL: ${fullUrl}`
-        }
-      ]
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    }
+  return (
+    JSON.stringify(aNorm) !==
+    JSON.stringify(bNorm)
   );
 }
 
 /* ===============================
-   メイン処理（WebService用）
+   URL生成
 =============================== */
-module.exports = async function () {
-  console.log("yuuri-monitor 開始:", getJSTTime());
+function buildFullUrl(link) {
+  if (!link) {
+    return null;
+  }
 
-  const latest = await getLatestPost();
-  const last = loadLast();
+  try {
+    return new URL(
+      link,
+      BASE_URL
+    ).href;
+  } catch {
+    return null;
+  }
+}
 
-  if (!last || isDifferent(latest, last)) {
-    console.log("差分あり → 通知します");
+/* ===============================
+   通知本文
+=============================== */
+function buildMessage(post) {
+  const fullUrl =
+    buildFullUrl(post.link);
 
-    // ===== 整形（LINEと同じ構造） =====
-    const fullUrl = latest.link
-      ? "https://fukuharaso-pu.com" + latest.link
-      : "URL取得失敗";
+  if (!fullUrl) {
+    throw new Error(
+      `日記URLの生成に失敗しました: ${post.link}`
+    );
+  }
 
-    const titleText = latest.title || "タイトル取得失敗";
+  return (
+    "ゆうりちゃんの日記が更新されました！\n\n" +
+    `タイトル: ${post.title}\n\n` +
+    `URL: ${fullUrl}`
+  );
+}
+
+/* ===============================
+   メイン処理
+=============================== */
+async function runYuuriMonitor() {
+  console.log(
+    "yuuri-monitor 開始:",
+    getJSTTime()
+  );
+
+  const latest =
+    await getLatestPost();
+
+  if (!latest) {
+    console.log(
+      "最新投稿を正常に取得できなかったため、通知・保存を行いません"
+    );
+
+    console.log(
+      "yuuri-monitor 完了:",
+      getJSTTime()
+    );
+
+    return;
+  }
+
+  const last =
+    loadLast();
+
+  if (
+    isDifferent(
+      latest,
+      last
+    )
+  ) {
+    console.log(
+      "差分あり → 通知します"
+    );
 
     const message =
-      `ゆうりちゃんの日記が更新されました！\n\n` +
-      `タイトル: ${titleText}\n\n` +
-      `URL: ${fullUrl}`;
+      buildMessage(latest);
 
-    // ===== 今月は Discord に通知 =====
-    await sendDiscord(message);
-
-    // ===== 来月はこれに戻すだけ =====
-    // await sendLine(latest);
+    /*
+     * NOTIFY_MODE=line
+     *   → LINE通知
+     *
+     * NOTIFY_MODE=discord
+     *   → Discord通知
+     *
+     * 通知失敗時はnotify()が例外を投げるため、
+     * 下のsaveLast()には到達しない。
+     */
+    await notify(message);
 
     saveLast({
       title: latest.title,
       link: latest.link,
-      lastNoticeTime: getJSTTime()
+      lastNoticeTime:
+        getJSTTime()
     });
-
   } else {
-    console.log("差分なし → 通知なし");
-
-    saveLast({
-      title: last.title,
-      link: last.link,
-      lastNoticeTime: last.lastNoticeTime
-    });
+    console.log(
+      "差分なし → 通知なし"
+    );
   }
 
-  console.log("yuuri-monitor 完了:", getJSTTime());
-};
+  console.log(
+    "yuuri-monitor 完了:",
+    getJSTTime()
+  );
+}
+
+module.exports =
+  runYuuriMonitor;
+
+/* ===============================
+   単体実行用
+   node yuuri-monitor.js
+=============================== */
+if (require.main === module) {
+  runYuuriMonitor().catch(err => {
+    console.error(
+      "yuuri-monitor 実行エラー:",
+      err.response?.data ||
+        err.message ||
+        err
+    );
+
+    process.exitCode = 1;
+  });
+}
