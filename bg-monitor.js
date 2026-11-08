@@ -1,15 +1,13 @@
-const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
-const { createBgHttpTrace } = require("./common/bg-http-trace");
+const { fetchBgPages, validateBgPages } = require("./common/bg-source");
 
 const {
   notify
 } = require("./common/notifier");
 
 const {
-  getJSTDate,
   getJSTTime
 } = require("./common/time");
 
@@ -19,9 +17,7 @@ const KEYWORDS = [
   "出勤延長"
 ];
 
-const REQUEST_TIMEOUT = 12_000;
 const RUN_TIMEOUT = 50_000;
-const FETCH_CONCURRENCY = 3;
 let running = false;
 
 /* ===============================
@@ -135,51 +131,6 @@ function uniqueHits(hits) {
 }
 
 /* ===============================
-   今日～7日後までのURL生成
-   JST基準
-=============================== */
-function buildUrls() {
-  const urls = [];
-
-  const jst = getJSTDate();
-
-  /*
-   * getJSTDate()はJSTをUTC系メソッドで
-   * 取り出すためのDateオブジェクト。
-   */
-  const today = new Date(
-    Date.UTC(
-      jst.getUTCFullYear(),
-      jst.getUTCMonth(),
-      jst.getUTCDate()
-    )
-  );
-
-  for (let i = 0; i <= 7; i++) {
-    const date = new Date(today);
-
-    date.setUTCDate(
-      today.getUTCDate() + i
-    );
-
-    const year =
-      date.getUTCFullYear();
-
-    const month =
-      date.getUTCMonth() + 1;
-
-    const day =
-      date.getUTCDate();
-
-    urls.push(
-      `https://www.kobe-b1.com/schedule/${year}/${month}/${day}`
-    );
-  }
-
-  return urls;
-}
-
-/* ===============================
    URLから日付を取得
 =============================== */
 function extractDateFromUrl(url) {
@@ -220,27 +171,11 @@ function extractDateFromUrl(url) {
 /* ===============================
    ページ解析
 =============================== */
-async function checkPage(url, signal) {
-  const res = await axios.get(
-    url,
-    {
-      timeout: REQUEST_TIMEOUT,
-      signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-          "AppleWebKit/537.36 Chrome/120 Safari/537.36"
-      }
-    }
-  );
-
-  const $ =
-    cheerio.load(res.data);
-
-  if (!$("table").length) {
-    throw Object.assign(new Error("出勤表が見つかりません"), {
-      code: "BG_INVALID_PAGE",
-      status: res.status
+function parsePage(url, html, strict) {
+  const $ = cheerio.load(html);
+  if (!$("table").length || (strict && !$("title").text().includes("出勤情報"))) {
+    throw Object.assign(new Error("出勤表を確認できないため、通知・保存を中止します"), {
+      code: "BG_UPSTREAM"
     });
   }
 
@@ -343,47 +278,7 @@ async function checkPage(url, signal) {
     });
   });
 
-  return { hits, status: res.status };
-}
-
-async function fetchPages(urls, signal) {
-  const results = new Array(urls.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < urls.length && !signal.aborted) {
-      const index = nextIndex++;
-      const url = urls[index];
-      const trace = createBgHttpTrace(url);
-      const deadline = AbortSignal.timeout(REQUEST_TIMEOUT);
-      try {
-        results[index] = await trace.run(() => checkPage(
-          url, AbortSignal.any([signal, deadline])
-        ));
-        trace.finish("ok", undefined, results[index].status);
-      } catch (err) {
-        const reason = signal.aborted
-          ? signal.reason.name
-          : deadline.aborted || ["ECONNABORTED", "ETIMEDOUT"].includes(err.code)
-            ? "timeout"
-            : err.code || err.name || "error";
-        trace.finish(reason, err, err.response?.status ?? err.status);
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, worker));
-  signal.throwIfAborted();
-
-  const failed = urls.length - results.filter(Boolean).length;
-  if (failed) {
-    throw Object.assign(
-      new Error(`${failed}/${urls.length}ページの取得に失敗したため、通知・保存を中止します`),
-      { code: "BG_UPSTREAM" }
-    );
-  }
-
-  return uniqueHits(results.flatMap(result => result.hits));
+  return hits;
 }
 
 /* ===============================
@@ -534,7 +429,7 @@ function buildNoticeText(hit) {
 /* ===============================
    メイン処理
 =============================== */
-async function monitor(signal, deadline) {
+async function monitor(signal, deadline, suppliedPages) {
   /*
    * 実行ごとにconfig.jsonを読み直す。
    * Render再起動なしで設定変更を反映できる。
@@ -542,11 +437,10 @@ async function monitor(signal, deadline) {
   const config =
     loadConfig();
 
-  const urls =
-    buildUrls();
-
-  // All eight pages must be fetched before comparing or writing any state.
-  const allHits = await fetchPages(urls, signal);
+  // Verify and parse all eight pages before comparing or writing any state.
+  const pages = suppliedPages ?? await fetchBgPages(signal);
+  validateBgPages(pages);
+  const allHits = uniqueHits(pages.flatMap(({ url, html }) => parsePage(url, html, suppliedPages !== undefined)));
   signal.throwIfAborted();
 
   const lastHits =
@@ -690,7 +584,7 @@ async function monitor(signal, deadline) {
   }
 }
 
-async function runBgMonitor({ signal } = {}) {
+async function runBgMonitor({ signal, pages } = {}) {
   if (running) {
     throw Object.assign(new Error("BG監視は実行中です"), { code: "BG_BUSY" });
   }
@@ -701,7 +595,7 @@ async function runBgMonitor({ signal } = {}) {
   const runSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   try {
     console.log("bg-monitor 開始:", getJSTTime());
-    await monitor(runSignal, deadline);
+    await monitor(runSignal, deadline, pages);
     console.log(`bg-monitor 完了: ${getJSTTime()} ${Date.now() - started}ms`);
   } catch (err) {
     console.error(`bg-monitor 失敗: ${Date.now() - started}ms ${err.message}`);

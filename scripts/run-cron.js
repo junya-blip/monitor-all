@@ -1,4 +1,5 @@
-const { createBgHttpTrace } = require("../common/bg-http-trace");
+const { fetchBgPages } = require("../common/bg-source");
+const { sendBgPages } = require("../common/bg-ingest");
 
 const ENDPOINTS = [
   "/run-pickup",
@@ -6,35 +7,6 @@ const ENDPOINTS = [
   "/run-heaven",
   "/run-yuuri"
 ];
-
-// At most three scheduled probes, one per 5-minute slot. Remove after diagnosis.
-const PROBE_FROM = Date.parse("2026-11-08T02:45:00Z");
-const PROBE_UNTIL = Date.parse("2026-11-08T03:00:00Z");
-const PROBE_URL = "https://www.kobe-b1.com/schedule/2026/11/8";
-
-async function probeBg() {
-  const now = Date.now();
-  if (process.env.RENDER_SERVICE_ID !== "crn-d98pqu4s728c73c45gvg" ||
-      now < PROBE_FROM || now >= PROBE_UNTIL) return;
-
-  const trace = createBgHttpTrace(PROBE_URL);
-  const deadline = AbortSignal.timeout(8_000);
-  try {
-    const response = await trace.run(() => require("axios").get(PROBE_URL, {
-      signal: deadline,
-      maxRedirects: 0,
-      maxContentLength: 2 * 1024 * 1024,
-      validateStatus: () => true,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-          "AppleWebKit/537.36 Chrome/120 Safari/537.36"
-      }
-    }));
-    trace.finish(response.status === 200 ? "ok" : "http_error", undefined, response.status);
-  } catch (error) {
-    trace.finish(deadline.aborted ? "timeout" : "error", error, error.response?.status);
-  }
-}
 
 const baseUrl = (
   process.env.MONITOR_BASE_URL ||
@@ -53,7 +25,6 @@ if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
 }
 
 async function run() {
-  const probe = probeBg().catch(() => console.error("BG probe failed to start"));
   let successes = 0;
   let failures = 0;
 
@@ -64,13 +35,22 @@ async function run() {
     console.log(`START ${endpoint}`);
 
     try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(timeoutMs)
-      });
-
-      // Read the full body before starting the next request, while keeping
-      // response content out of the logs.
-      await response.arrayBuffer();
+      const signal = AbortSignal.timeout(timeoutMs);
+      let response;
+      const useIngest = endpoint === "/run-bg" && (
+        process.env.RENDER_SERVICE_TYPE === "cron" || process.env.BG_INGEST_SECRET
+      );
+      if (useIngest) {
+        if (!process.env.BG_INGEST_SECRET) throw new Error("BG ingest secret is missing");
+        const pages = await fetchBgPages(signal, { checkSchedule: true });
+        console.log("BG CRON fetched pages=8; sending to Web Service");
+        response = await sendBgPages(baseUrl, pages, signal);
+        console.log(`BG CRON transfer HTTP ${response.status}`);
+      } else {
+        response = await fetch(url, { signal });
+        // Read the body before starting the next monitor.
+        await response.arrayBuffer();
+      }
 
       const elapsedMs = Date.now() - startedAt;
 
@@ -95,7 +75,6 @@ async function run() {
     }
   }
 
-  await probe;
   console.log(
     `SUMMARY successes=${successes} failures=${failures}`
   );

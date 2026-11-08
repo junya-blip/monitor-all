@@ -12,6 +12,7 @@ const {
 // 各 monitor の読み込み
 const pickupMonitor = require("./pickup-monitor.js");
 const bgMonitor = require("./bg-monitor.js");
+const { installBgIngest } = require("./common/bg-ingest");
 const heavenMonitor = require("./heaven-monitor.js");
 const yuuriMonitor = require("./yuuri-monitor.js");
 
@@ -113,9 +114,12 @@ function safeLoad(filename) {
 function linkify(text) {
   if (!text) return "-";
 
-  return text.replace(
+  const escaped = text.replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+  return escaped.replace(
     /(https?:\/\/[^\s]+)/g,
-    '<a href="$1" target="_blank" style="color:#4ea3ff;">$1</a>'
+    '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#4ea3ff;">$1</a>'
   );
 }
 
@@ -151,6 +155,8 @@ app.get("/run-bg", async (req, res) => {
     res.status(status).send("bg-monitor failed");
   }
 });
+
+installBgIngest(app, bgMonitor);
 
 app.get("/run-heaven", async (req, res) => {
   try {
