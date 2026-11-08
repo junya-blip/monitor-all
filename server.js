@@ -171,12 +171,13 @@ app.get("/dashboard", (req, res) => {
   const bgNotice = safeLoad("bg-lastNotice.json");
   const yuuri = safeLoad("yuuri-last.json");
 
-  // heaven-monitor はキャストごとに複数ファイル
-  const heavenDir = path.join(__dirname, "data");
-  const heavenFiles = fs.readdirSync(heavenDir).filter(f => f.startsWith("heaven-last-"));
-  const heavenData = heavenFiles.map(f => ({
-    name: f.replace("heaven-last-", "").replace(".json", ""),
-    data: safeLoad(f)
+  // cast.json の登録順に、現在の監視対象だけを表示する。
+  const casts = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "cast.json"), "utf8")
+  );
+  const heavenData = casts.map(cast => ({
+    name: cast.name,
+    data: safeLoad(`heaven-last-${cast.name}.json`)
   }));
 
   let html = `
