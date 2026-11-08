@@ -1,8 +1,11 @@
 const { createHmac, randomBytes, timingSafeEqual } = require("node:crypto");
+const { gzipSync, gunzipSync } = require("node:zlib");
 const { validateBgPages } = require("./bg-source");
 
 const ROOT = "/bg-ingest";
 const BODY_LIMIT = 10 * 1024 * 1024;
+const WIRE_LIMIT = 512 * 1024;
+const CONTENT_TYPE = "application/gzip";
 const TOKEN_TTL_MS = 90_000;
 const TOKEN_FORMAT = /^[A-Za-z0-9_-]{43}$/;
 const MAC_FORMAT = /^[a-f0-9]{64}$/;
@@ -22,7 +25,7 @@ function signature(secret, token, body) {
 
 function installBgIngest(app, monitor) {
   const express = require("express");
-  const raw = express.raw({ type: "application/json", inflate: false, limit: BODY_LIMIT });
+  const raw = express.raw({ type: CONTENT_TYPE, inflate: false, limit: WIRE_LIMIT });
   const secret = process.env.BG_INGEST_SECRET;
   const tokens = new Map();
 
@@ -46,10 +49,10 @@ function installBgIngest(app, monitor) {
     // Reject callers without a live challenge before reading the body.
     if (!TOKEN_FORMAT.test(token ?? "") || !MAC_FORMAT.test(mac ?? "") ||
         !(tokens.get(token) > Date.now())) return res.sendStatus(401);
-    if (!req.is("application/json")) return res.sendStatus(415);
+    if (!req.is(CONTENT_TYPE)) return res.sendStatus(415);
     const length = Number(req.get("Content-Length"));
     if (!Number.isSafeInteger(length) || length < 1) return res.sendStatus(411);
-    if (length > BODY_LIMIT) return res.sendStatus(413);
+    if (length > WIRE_LIMIT) return res.sendStatus(413);
     raw(req, res, error => {
       if (!error) return next();
       if (!res.destroyed) res.sendStatus([413, 415].includes(error.status) ? error.status : 400);
@@ -64,10 +67,11 @@ function installBgIngest(app, monitor) {
 
     let pages;
     try {
-      pages = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(req.body));
+      const decoded = gunzipSync(req.body, { maxOutputLength: BODY_LIMIT });
+      pages = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decoded));
       validateBgPages(pages);
-    } catch {
-      return res.sendStatus(400);
+    } catch (error) {
+      return res.sendStatus(error.code === "ERR_BUFFER_TOO_LARGE" ? 413 : 400);
     }
 
     const controller = new AbortController();
@@ -96,8 +100,11 @@ async function sendBgPages(baseUrl, pages, signal) {
     throw new Error("BG ingest requires HTTPS");
   }
   validateBgPages(pages);
-  const body = Buffer.from(JSON.stringify(pages));
-  if (body.length > BODY_LIMIT) throw new Error("BG payload exceeds size limit");
+  const json = Buffer.from(JSON.stringify(pages));
+  if (json.length > BODY_LIMIT) throw new Error("BG payload exceeds size limit");
+  const body = gzipSync(json);
+  if (body.length > WIRE_LIMIT) throw new Error("BG compressed payload exceeds size limit");
+  console.log(`BG CRON payload bytes=${body.length} rawBytes=${json.length}`);
   const challenge = await fetch(target.href + "/challenge", {
     method: "POST",
     signal,
@@ -117,7 +124,7 @@ async function sendBgPages(baseUrl, pages, signal) {
     redirect: "error",
     body,
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": CONTENT_TYPE,
       "X-BG-Token": token,
       "X-BG-Signature": signature(secret, token, body)
     }

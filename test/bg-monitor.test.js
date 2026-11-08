@@ -8,6 +8,7 @@ const path = require("node:path");
 const { test } = require("node:test");
 const { setTimeout: delay } = require("node:timers/promises");
 const { promisify } = require("node:util");
+const { gzipSync } = require("node:zlib");
 const { getJSTDate } = require("../common/time");
 
 const root = path.resolve(__dirname, "..");
@@ -292,16 +293,18 @@ test("ingestion rejects unauthenticated, tampered, incomplete, oversized and rep
   }
   const post = (body, nonce, mac = sign(body, nonce)) => fetch(route, {
     method: "POST", body,
-    headers: { "Content-Type": "application/json", "X-BG-Token": nonce, "X-BG-Signature": mac }
+    headers: { "Content-Type": "application/gzip", "X-BG-Token": nonce, "X-BG-Signature": mac }
   });
-  const validBody = JSON.stringify(pages);
+  const pack = data => gzipSync(JSON.stringify(data));
+  const validBody = pack(pages);
   const nonce = await token();
-  assert.equal((await post(validBody + " ", nonce, sign(validBody, nonce))).status, 401);
-  assert.equal((await post("x".repeat(10 * 1024 * 1024 + 1), nonce)).status, 413);
-  assert.equal((await post(JSON.stringify(pages.slice(1)), await token())).status, 400);
-  assert.equal((await post(JSON.stringify([pages[1], ...pages.slice(1)]), await token())).status, 400);
+  assert.equal((await post(Buffer.concat([validBody, Buffer.from(" ")]), nonce, sign(validBody, nonce))).status, 401);
+  assert.equal((await post(Buffer.alloc(512 * 1024 + 1), nonce)).status, 413);
+  assert.equal((await post(gzipSync(Buffer.alloc(10 * 1024 * 1024 + 1)), await token())).status, 413);
+  assert.equal((await post(pack(pages.slice(1)), await token())).status, 400);
+  assert.equal((await post(pack([pages[1], ...pages.slice(1)]), await token())).status, 400);
   const malformed = pages.map((page, i) => i === 0 ? { ...page, html: "<table></table>" } : page);
-  assert.equal((await post(JSON.stringify(malformed), await token())).status, 502);
+  assert.equal((await post(pack(malformed), await token())).status, 502);
   assert.deepEqual(await app.snapshot(), initial);
   assert.equal(app.state.notices.length, 0);
 
