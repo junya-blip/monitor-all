@@ -2,6 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { createBgHttpTrace } = require("./common/bg-http-trace");
 
 const {
   notify
@@ -353,25 +354,20 @@ async function fetchPages(urls, signal) {
     while (nextIndex < urls.length && !signal.aborted) {
       const index = nextIndex++;
       const url = urls[index];
-      const started = Date.now();
+      const trace = createBgHttpTrace(url);
       const deadline = AbortSignal.timeout(REQUEST_TIMEOUT);
       try {
-        results[index] = await checkPage(
+        results[index] = await trace.run(() => checkPage(
           url, AbortSignal.any([signal, deadline])
-        );
-        console.log(
-          `BG PAGE OK ${url} HTTP ${results[index].status} ${Date.now() - started}ms`
-        );
+        ));
+        trace.finish("ok", undefined, results[index].status);
       } catch (err) {
         const reason = signal.aborted
           ? signal.reason.name
           : deadline.aborted || ["ECONNABORTED", "ETIMEDOUT"].includes(err.code)
             ? "timeout"
             : err.code || err.name || "error";
-        const status = err.response?.status ?? err.status;
-        console.error(
-          `BG PAGE FAIL ${url} ${status ? `HTTP ${status} ` : ""}${reason} ${Date.now() - started}ms`
-        );
+        trace.finish(reason, err, err.response?.status ?? err.status);
       }
     }
   }
