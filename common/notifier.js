@@ -8,7 +8,7 @@ const REQUEST_TIMEOUT = 20000;
 /* ===============================
    Discord通知
 =============================== */
-async function sendDiscord(message) {
+async function sendDiscord(message, { signal } = {}) {
   const webhookUrl =
     process.env.DISCORD_WEBHOOK_URL;
 
@@ -31,7 +31,8 @@ async function sendDiscord(message) {
         content: String(message)
       },
       {
-        timeout: REQUEST_TIMEOUT
+        timeout: REQUEST_TIMEOUT,
+        signal
       }
     );
 
@@ -56,7 +57,7 @@ async function sendDiscord(message) {
 /* ===============================
    LINE通知
 =============================== */
-async function sendLine(message) {
+async function sendLine(message, { signal } = {}) {
   const token = process.env.LINE_TOKEN;
   const userId = process.env.LINE_USER_ID;
 
@@ -95,7 +96,8 @@ async function sendLine(message) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        timeout: REQUEST_TIMEOUT
+        timeout: REQUEST_TIMEOUT,
+        signal
       }
     );
 
@@ -120,7 +122,7 @@ async function sendLine(message) {
 /* ===============================
    通知先を環境変数で切り替える
 =============================== */
-async function notify(message) {
+async function notify(message, options) {
   const mode = String(
     process.env.NOTIFY_MODE || "line"
   )
@@ -128,12 +130,12 @@ async function notify(message) {
     .trim();
 
   if (mode === "line") {
-    await sendLine(message);
+    await sendLine(message, options);
     return;
   }
 
   if (mode === "discord") {
-    await sendDiscord(message);
+    await sendDiscord(message, options);
     return;
   }
 

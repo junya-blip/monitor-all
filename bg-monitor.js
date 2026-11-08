@@ -18,7 +18,10 @@ const KEYWORDS = [
   "出勤延長"
 ];
 
-const REQUEST_TIMEOUT = 20000;
+const REQUEST_TIMEOUT = 12_000;
+const RUN_TIMEOUT = 50_000;
+const FETCH_CONCURRENCY = 3;
+let running = false;
 
 /* ===============================
    config.json 読み込み
@@ -216,11 +219,12 @@ function extractDateFromUrl(url) {
 /* ===============================
    ページ解析
 =============================== */
-async function checkPage(url) {
+async function checkPage(url, signal) {
   const res = await axios.get(
     url,
     {
       timeout: REQUEST_TIMEOUT,
+      signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -231,6 +235,13 @@ async function checkPage(url) {
 
   const $ =
     cheerio.load(res.data);
+
+  if (!$("table").length) {
+    throw Object.assign(new Error("出勤表が見つかりません"), {
+      code: "BG_INVALID_PAGE",
+      status: res.status
+    });
+  }
 
   const hits = [];
 
@@ -331,7 +342,52 @@ async function checkPage(url) {
     });
   });
 
-  return hits;
+  return { hits, status: res.status };
+}
+
+async function fetchPages(urls, signal) {
+  const results = new Array(urls.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < urls.length && !signal.aborted) {
+      const index = nextIndex++;
+      const url = urls[index];
+      const started = Date.now();
+      const deadline = AbortSignal.timeout(REQUEST_TIMEOUT);
+      try {
+        results[index] = await checkPage(
+          url, AbortSignal.any([signal, deadline])
+        );
+        console.log(
+          `BG PAGE OK ${url} HTTP ${results[index].status} ${Date.now() - started}ms`
+        );
+      } catch (err) {
+        const reason = signal.aborted
+          ? signal.reason.name
+          : deadline.aborted || ["ECONNABORTED", "ETIMEDOUT"].includes(err.code)
+            ? "timeout"
+            : err.code || err.name || "error";
+        const status = err.response?.status ?? err.status;
+        console.error(
+          `BG PAGE FAIL ${url} ${status ? `HTTP ${status} ` : ""}${reason} ${Date.now() - started}ms`
+        );
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, worker));
+  signal.throwIfAborted();
+
+  const failed = urls.length - results.filter(Boolean).length;
+  if (failed) {
+    throw Object.assign(
+      new Error(`${failed}/${urls.length}ページの取得に失敗したため、通知・保存を中止します`),
+      { code: "BG_UPSTREAM" }
+    );
+  }
+
+  return uniqueHits(results.flatMap(result => result.hits));
 }
 
 /* ===============================
@@ -482,12 +538,7 @@ function buildNoticeText(hit) {
 /* ===============================
    メイン処理
 =============================== */
-async function runBgMonitor() {
-  console.log(
-    "bg-monitor 開始:",
-    getJSTTime()
-  );
-
+async function monitor(signal, deadline) {
   /*
    * 実行ごとにconfig.jsonを読み直す。
    * Render再起動なしで設定変更を反映できる。
@@ -498,49 +549,9 @@ async function runBgMonitor() {
   const urls =
     buildUrls();
 
-  let allHits = [];
-  let fetchErrorCount = 0;
-
-  for (const url of urls) {
-    try {
-      const hits =
-        await checkPage(url);
-
-      allHits =
-        allHits.concat(hits);
-    } catch (err) {
-      fetchErrorCount += 1;
-
-      console.error(
-        "ページ取得エラー:",
-        url,
-        err.response?.status ||
-          err.message ||
-          err
-      );
-    }
-  }
-
-  allHits =
-    uniqueHits(allHits);
-
-  /*
-   * 一部ページを取得できなかった状態で
-   * 保存すると、取得不能分が「消えた」と判断される。
-   * そのため今回は通知・保存を中止する。
-   */
-  if (fetchErrorCount > 0) {
-    console.log(
-      `${fetchErrorCount}ページの取得に失敗したため、通知・保存を中止します`
-    );
-
-    console.log(
-      "bg-monitor 完了:",
-      getJSTTime()
-    );
-
-    return;
-  }
+  // All eight pages must be fetched before comparing or writing any state.
+  const allHits = await fetchPages(urls, signal);
+  signal.throwIfAborted();
 
   const lastHits =
     loadLast();
@@ -584,11 +595,6 @@ async function runBgMonitor() {
       clearLastNotice();
     }
 
-    console.log(
-      "bg-monitor 完了:",
-      getJSTTime()
-    );
-
     return;
   }
 
@@ -597,6 +603,11 @@ async function runBgMonitor() {
   );
 
   const notifiedNoticeList = [];
+  const notifiedHits = [];
+
+  function saveNotices() {
+    saveLastNotice([...lastNotice.notices, ...notifiedNoticeList]);
+  }
 
   for (const hit of diff) {
     const noticeText =
@@ -639,11 +650,22 @@ async function runBgMonitor() {
      * NOTIFY_MODE=discord
      *   → Discord通知
      *
-     * 失敗時は例外になるため、
-     * 下の状態保存には進まない。
+     * 通知済みの差分だけを記録し、未送信分は次回に回す。
      */
-    await notify(noticeText);
+    try {
+      signal.throwIfAborted();
+      // Let an already started delivery settle after a client disconnect,
+      // while still enforcing the run deadline on the notification request.
+      await notify(noticeText, { signal: deadline });
+    } catch (err) {
+      if (notifiedHits.length > 0) {
+        saveLast(uniqueHits([...lastHits, ...notifiedHits]));
+        saveNotices();
+      }
+      throw err;
+    }
 
+    notifiedHits.push(hit);
     notifiedNoticeList.push(
       noticeText
     );
@@ -664,25 +686,38 @@ async function runBgMonitor() {
   if (
     notifiedNoticeList.length > 0
   ) {
-    const mergedList = [
-      ...(lastNotice.notices || []),
-      ...notifiedNoticeList
-    ];
-
-    saveLastNotice(
-      mergedList,
-      getJSTTime()
-    );
+    saveNotices();
   } else {
     console.log(
       "差分はあったが通知対象はなし"
     );
   }
+}
 
-  console.log(
-    "bg-monitor 完了:",
-    getJSTTime()
-  );
+async function runBgMonitor({ signal } = {}) {
+  if (running) {
+    throw Object.assign(new Error("BG監視は実行中です"), { code: "BG_BUSY" });
+  }
+
+  running = true;
+  const started = Date.now();
+  const deadline = AbortSignal.timeout(RUN_TIMEOUT);
+  const runSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  try {
+    console.log("bg-monitor 開始:", getJSTTime());
+    await monitor(runSignal, deadline);
+    console.log(`bg-monitor 完了: ${getJSTTime()} ${Date.now() - started}ms`);
+  } catch (err) {
+    console.error(`bg-monitor 失敗: ${Date.now() - started}ms ${err.message}`);
+    if (deadline.aborted) {
+      throw Object.assign(new Error("BG監視の実行時間が上限に達しました"), {
+        code: "BG_DEADLINE"
+      });
+    }
+    throw err;
+  } finally {
+    running = false;
+  }
 }
 
 module.exports =

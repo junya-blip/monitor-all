@@ -133,12 +133,22 @@ app.get("/run-pickup", async (req, res) => {
 });
 
 app.get("/run-bg", async (req, res) => {
+  const controller = new AbortController();
+  res.once("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+
   try {
-    await bgMonitor();
-    res.send("bg-monitor done");
+    await bgMonitor({ signal: controller.signal });
+    if (!res.destroyed) res.send("bg-monitor done");
   } catch (e) {
-    console.error(e);
-    res.status(500).send(e.toString());
+    if (res.destroyed) return;
+    const status = {
+      BG_BUSY: 409,
+      BG_UPSTREAM: 502,
+      BG_DEADLINE: 504
+    }[e.code] || 500;
+    res.status(status).send("bg-monitor failed");
   }
 });
 
