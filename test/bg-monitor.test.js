@@ -92,7 +92,7 @@ async function fixture(t, runDeadline, useIngest = false) {
   });
   await new Promise(resolve => upstream.listen(0, "127.0.0.1", resolve));
   for (const file of [
-    "bg-monitor.js", "server.js", "scripts/run-cron.js", "common/bg-http-trace.js",
+    "bg-monitor.js", "bg-monitor2.js", "bg-monitor2-casts.json", "server.js", "scripts/run-cron.js", "common/bg-http-trace.js",
     "common/notifier.js", "common/time.js", "common/bg-source.js", "common/bg-ingest.js"
   ]) {
     const destination = path.join(temp, file);

@@ -82,4 +82,4 @@ async function fetchBgPages(signal, { checkSchedule = false } = {}) {
   return results;
 }
 
-module.exports = { fetchBgPages, validateBgPages };
+module.exports = { buildBgUrls, fetchBgPages, validateBgPages };

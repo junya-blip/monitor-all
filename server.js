@@ -13,6 +13,7 @@ const {
 const pickupMonitor = require("./pickup-monitor.js");
 const bgMonitor = require("./bg-monitor.js");
 const { installBgIngest } = require("./common/bg-ingest");
+const bgMonitor2 = require("./bg-monitor2.js");
 const heavenMonitor = require("./heaven-monitor.js");
 const yuuriMonitor = require("./yuuri-monitor.js");
 
@@ -108,6 +109,12 @@ function safeLoad(filename) {
   }
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+
 /* ===============================
    linkify
 =============================== */
@@ -156,7 +163,7 @@ app.get("/run-bg", async (req, res) => {
   }
 });
 
-installBgIngest(app, bgMonitor);
+installBgIngest(app, bgMonitor, ({ pages }) => bgMonitor2.runBgMonitor2({ pages }));
 
 app.get("/run-heaven", async (req, res) => {
   try {
@@ -185,6 +192,7 @@ app.get("/dashboard", (req, res) => {
   const pickup = safeLoad("pickup-last.json");
   const bg = safeLoad("bg-last.json");
   const bgNotice = safeLoad("bg-lastNotice.json");
+  const bg2 = safeLoad("bg-monitor2-last.json");
   const yuuri = safeLoad("yuuri-last.json");
 
   // cast.json の登録順に、現在の監視対象だけを表示する。
@@ -374,6 +382,17 @@ app.get("/dashboard", (req, res) => {
   : "-"}</pre>
 
       <p>最終通知: ${bgNotice.lastNoticeTime || "-"}</p>
+    </div>
+
+    <!-- bg-monitor2 -->
+    <div class="box">
+      <h2>ビギナーズ予約情報</h2>
+      <p>最終チェック日時: ${escapeHtml(bg2.checkedAt || "-")}</p>
+      <p>チェック対象日: ${escapeHtml(bg2.targetDate || "-")}</p>
+      <pre>${Array.isArray(bg2.notificationCasts) && bg2.notificationCasts.length
+        ? bg2.notificationCasts.map(item => escapeHtml(`${item.name}：${item.shift}`)).join("\n")
+        : "通知対象なし"}</pre>
+      <p>最終通知日時: ${escapeHtml(bg2.lastNotifiedAt || "-")}</p>
     </div>
 
     <!-- yuuri-monitor -->

@@ -23,7 +23,7 @@ function signature(secret, token, body) {
     .digest("hex");
 }
 
-function installBgIngest(app, monitor) {
+function installBgIngest(app, monitor, secondaryMonitor) {
   const express = require("express");
   const raw = express.raw({ type: CONTENT_TYPE, inflate: false, limit: WIRE_LIMIT });
   const secret = process.env.BG_INGEST_SECRET;
@@ -79,16 +79,31 @@ function installBgIngest(app, monitor) {
       if (!res.writableEnded) controller.abort();
     });
     console.log("BG INGEST received pages=8");
+    let primaryError;
     try {
       await monitor({ signal: controller.signal, pages });
       console.log("BG INGEST OK pages=8");
-      if (!res.destroyed) res.send("bg-monitor done");
     } catch (error) {
-      if (res.destroyed) return;
-      const status = { BG_BUSY: 409, BG_UPSTREAM: 502, BG_DEADLINE: 504 }[error.code] || 500;
-      console.error(`BG INGEST failed HTTP ${status}`);
-      res.sendStatus(status);
+      primaryError = error;
+      console.error(`BG INGEST primary monitor failed: ${error.code || "ERROR"}`);
     }
+
+    if (secondaryMonitor) {
+      try {
+        await secondaryMonitor({ signal: controller.signal, pages });
+      } catch (error) {
+        // BG2 owns independent state and retry rules; do not change BG's result.
+        console.error(`BG2 INGEST failed: ${error.message || error}`);
+      }
+    }
+
+    if (primaryError) {
+      if (res.destroyed) return;
+      const status = { BG_BUSY: 409, BG_UPSTREAM: 502, BG_DEADLINE: 504 }[primaryError.code] || 500;
+      console.error(`BG INGEST failed HTTP ${status}`);
+      return res.sendStatus(status);
+    }
+    if (!res.destroyed) res.send("bg-monitor done");
   });
 }
 
