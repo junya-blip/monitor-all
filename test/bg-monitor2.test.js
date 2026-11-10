@@ -13,16 +13,11 @@ const {
   loadCasts,
   parseScheduleHtml,
   buildMessage,
-  loadOneShotConfig,
   runBgMonitor2
 } = require("../bg-monitor2");
 const { buildBgUrls } = require("../common/bg-source");
 const { JST_OFFSET_MS } = require("../common/time");
 const { installBgIngest } = require("../common/bg-ingest");
-
-function runBg2(options = {}) {
-  return runBgMonitor2({ oneShotFile: path.join(os.tmpdir(), `bg-monitor2-no-test-${process.pid}.json`), ...options });
-}
 
 function epochJst(year, month, day, hour = 0, minute = 0) {
   return Date.UTC(year, month - 1, day, hour - 9, minute);
@@ -50,7 +45,6 @@ function pagesFor(todayHtml) {
 async function tempFiles(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "bg-monitor2-test-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  await fs.mkdir(path.join(dir, "data"));
   const castsFile = path.join(dir, "casts.json");
   const stateFile = path.join(dir, "data", "last.json");
   return { dir, castsFile, stateFile };
@@ -111,13 +105,13 @@ test("before 16:30 does not check; after 16:30 checks once including zero matche
   const before = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 16, 29);
   const due = before + 60_000;
   let calls = 0;
-  assert.equal((await runBg2({ pages, now: before, castsFile, stateFile, notifyFn: async () => { calls++; } })).status, "before-window");
+  assert.equal((await runBgMonitor2({ pages, now: before, castsFile, stateFile, notifyFn: async () => { calls++; } })).status, "before-window");
   assert.equal(calls, 0);
-  const first = await runBg2({ pages, now: due, castsFile, stateFile, notifyFn: async () => { calls++; } });
+  const first = await runBgMonitor2({ pages, now: due, castsFile, stateFile, notifyFn: async () => { calls++; } });
   assert.equal(first.status, "checked");
   assert.deepEqual(first.entries, []);
   assert.equal(calls, 0);
-  assert.equal((await runBg2({ pages, now: due + 300_000, castsFile, stateFile, notifyFn: async () => { calls++; } })).status, "already-checked");
+  assert.equal((await runBgMonitor2({ pages, now: due + 300_000, castsFile, stateFile, notifyFn: async () => { calls++; } })).status, "already-checked");
   assert.equal(calls, 0);
   assert.ok((await fs.readFile(stateFile, "utf8")).includes('"checkedJstDate"'));
 });
@@ -127,7 +121,7 @@ test("missing or failed shared-page fetch does not mark the day complete", async
   await fs.writeFile(castsFile, JSON.stringify(["ゆうひ"]));
   const base = new Date(Date.now() + JST_OFFSET_MS);
   const due = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 16, 30);
-  await assert.rejects(runBg2({ now: due, castsFile, stateFile, notifyFn: async () => {} }), /8ページ分/);
+  await assert.rejects(runBgMonitor2({ now: due, castsFile, stateFile, notifyFn: async () => {} }), /8ページ分/);
   await assert.rejects(fs.access(stateFile));
 });
 
@@ -138,19 +132,19 @@ test("eligible casts are notified once; notification or parse failure remains re
   const base = new Date(Date.now() + JST_OFFSET_MS);
   const due = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 16, 30);
   const messages = [];
-  const first = await runBg2({ pages, now: due, castsFile, stateFile, notifyFn: async message => messages.push(message) });
+  const first = await runBgMonitor2({ pages, now: due, castsFile, stateFile, notifyFn: async message => messages.push(message) });
   assert.equal(first.entries.length, 1);
   assert.match(messages[0], /対象キャスト：ゆうひ/);
   assert.doesNotMatch(messages[0], /リンス/);
-  assert.equal((await runBg2({ pages, now: due + 300_000, castsFile, stateFile, notifyFn: async message => messages.push(message) })).status, "already-checked");
+  assert.equal((await runBgMonitor2({ pages, now: due + 300_000, castsFile, stateFile, notifyFn: async message => messages.push(message) })).status, "already-checked");
   assert.equal(messages.length, 1);
 
   const retryState = path.join(path.dirname(stateFile), "retry.json");
-  await assert.rejects(runBg2({ pages, now: due, castsFile, stateFile: retryState, notifyFn: async () => { throw new Error("temporary notification error"); } }), /temporary notification error/);
+  await assert.rejects(runBgMonitor2({ pages, now: due, castsFile, stateFile: retryState, notifyFn: async () => { throw new Error("temporary notification error"); } }), /temporary notification error/);
   await assert.rejects(fs.access(retryState));
-  await assert.rejects(runBg2({ pages: pagesFor("<title>Maintenance</title><table></table>"), now: due, castsFile, stateFile: retryState, notifyFn: async () => {} }), /構造/);
+  await assert.rejects(runBgMonitor2({ pages: pagesFor("<title>Maintenance</title><table></table>"), now: due, castsFile, stateFile: retryState, notifyFn: async () => {} }), /構造/);
   await assert.rejects(fs.access(retryState));
-  assert.ok((await runBg2({ pages, now: due + 1000, castsFile, stateFile: retryState, notifyFn: async () => {} })).status === "checked");
+  assert.ok((await runBgMonitor2({ pages, now: due + 1000, castsFile, stateFile: retryState, notifyFn: async () => {} })).status === "checked");
 });
 
 test("concurrent same-day cron deliveries cannot send duplicate notifications", async t => {
@@ -160,75 +154,12 @@ test("concurrent same-day cron deliveries cannot send duplicate notifications", 
   const base = new Date(Date.now() + JST_OFFSET_MS);
   const due = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 16, 30);
   let release;
-  const first = runBg2({ pages, now: due, castsFile, stateFile, notifyFn: () => new Promise(resolve => { release = resolve; }) });
+  const first = runBgMonitor2({ pages, now: due, castsFile, stateFile, notifyFn: () => new Promise(resolve => { release = resolve; }) });
   while (!release) await new Promise(resolve => setTimeout(resolve, 1));
-  const second = await runBg2({ pages, now: due, castsFile, stateFile, notifyFn: async () => assert.fail("duplicate notification") });
+  const second = await runBgMonitor2({ pages, now: due, castsFile, stateFile, notifyFn: async () => assert.fail("duplicate notification") });
   assert.equal(second.status, "busy");
   release();
   assert.equal((await first).status, "checked");
-});
-
-test("one-shot mode sends only the configured cast once and leaves normal BG2 state untouched", async t => {
-  const { dir, castsFile, stateFile } = await tempFiles(t);
-  const oneShotFile = path.join(dir, "one-shot.json");
-  const oneShotStateFile = path.join(dir, "one-shot-state.json");
-  const names = ["リンス", "シャンプー", "しずく", "ゆうひ", "アテナ", "さくらんぼ", "ゆいな", "るのあ", "みなも"];
-  await fs.writeFile(castsFile, JSON.stringify(names));
-  const base = new Date(Date.now() + JST_OFFSET_MS);
-  const runEpoch = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 17, 0);
-  const runDay = new Date(runEpoch + JST_OFFSET_MS);
-  const target = new Date(Date.UTC(runDay.getUTCFullYear(), runDay.getUTCMonth(), runDay.getUTCDate() + 4));
-  const targetDate = `${target.getUTCFullYear()}/${String(target.getUTCMonth() + 1).padStart(2, "0")}/${String(target.getUTCDate()).padStart(2, "0")}`;
-  const runDate = `${runDay.getUTCFullYear()}/${String(runDay.getUTCMonth() + 1).padStart(2, "0")}/${String(runDay.getUTCDate()).padStart(2, "0")}`;
-  await fs.writeFile(oneShotFile, JSON.stringify({ id: "minamo-one-shot-test", runDate, targetDate, cast: "みなも" }));
-  assert.deepEqual(loadOneShotConfig(oneShotFile), { id: "minamo-one-shot-test", runDate, targetDate, cast: "みなも" });
-  const prior = { checkedJstDate: runDate.replaceAll("/", "-"), checkedAt: "prior", targetDate: "prior", notificationCasts: [], lastNotifiedAt: "-" };
-  await fs.writeFile(stateFile, JSON.stringify(prior));
-  const pages = pagesFor(pageHtml(card("みなも(24)", "11:00～20:00") + card("ゆうひ(23)", "10:00～19:00")));
-  const messages = [];
-  const opts = { pages, now: runEpoch, castsFile, stateFile, oneShotFile, oneShotStateFile, notifyFn: async message => messages.push(message), logger: { log() {}, error() {} } };
-  const sent = await runBg2(opts);
-  assert.equal(sent.status, "sent");
-  assert.equal(sent.shift, "11:00～20:00");
-  assert.equal(messages.length, 1);
-  assert.equal(messages[0], buildMessage(target, [{ name: "みなも", shift: "11:00～20:00" }]));
-  assert.doesNotMatch(messages[0], /ゆうひ|リンス|シャンプー/);
-  assert.deepEqual(JSON.parse(await fs.readFile(stateFile, "utf8")), prior);
-  assert.equal((await runBg2(opts)).status, "already-attempted");
-  assert.equal(messages.length, 1);
-  assert.equal(JSON.parse(await fs.readFile(oneShotStateFile, "utf8")).status, "sent");
-});
-
-test("one-shot mode does not send for absent shift or SOLD OUT and records failed LINE attempt once", async t => {
-  const { dir, castsFile } = await tempFiles(t);
-  const stateFile = path.join(dir, "daily.json");
-  const oneShotFile = path.join(dir, "one-shot.json");
-  const oneShotStateFile = path.join(dir, "once.json");
-  await fs.writeFile(castsFile, JSON.stringify(["みなも"]));
-  const base = new Date(Date.now() + JST_OFFSET_MS);
-  const now = epochJst(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), 17, 0);
-  const d = new Date(now + JST_OFFSET_MS);
-  const runDate = `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}`;
-  const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 4));
-  const targetDate = `${target.getUTCFullYear()}/${String(target.getUTCMonth() + 1).padStart(2, "0")}/${String(target.getUTCDate()).padStart(2, "0")}`;
-  await fs.writeFile(oneShotFile, JSON.stringify({ id: "minamo-one-shot-test", runDate, targetDate, cast: "みなも" }));
-  let calls = 0;
-  let pages = pagesFor(pageHtml(card("みなも(24)", "")));
-  let opts = { pages, now, castsFile, stateFile, oneShotFile, oneShotStateFile, notifyFn: async () => { calls++; }, logger: { log() {}, error() {} } };
-  assert.equal((await runBg2(opts)).status, "not-eligible");
-  pages = pagesFor(pageHtml(card("みなも(24)", "11:00～20:00", { soldAlt: true })));
-  opts = { ...opts, pages };
-  assert.equal((await runBg2(opts)).status, "sold-out");
-  assert.equal(calls, 0);
-  await assert.rejects(fs.access(oneShotStateFile));
-
-  pages = pagesFor(pageHtml(card("みなも(24)", "11:00～20:00")));
-  opts = { ...opts, pages, notifyFn: async () => { calls++; throw new Error("LINE HTTP error"); } };
-  await assert.rejects(runBg2(opts), /LINE HTTP error/);
-  assert.equal(calls, 1);
-  assert.equal(JSON.parse(await fs.readFile(oneShotStateFile, "utf8")).status, "failed");
-  assert.equal((await runBg2(opts)).status, "already-attempted");
-  assert.equal(calls, 1);
 });
 
 test("authenticated BG ingest passes the same eight HTML pages to both monitors", async t => {

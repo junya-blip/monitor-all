@@ -10,8 +10,6 @@ const { validateBgPages } = require("./common/bg-source");
 const ROOT = __dirname;
 const CASTS_FILE = path.join(ROOT, "bg-monitor2-casts.json");
 const STATE_FILE = path.join(ROOT, "data", "bg-monitor2-last.json");
-const ONE_SHOT_FILE = path.join(ROOT, "bg-monitor2-test-once.json");
-const ONE_SHOT_STATE_FILE = path.join(ROOT, "data", "bg-monitor2-test-once-last.json");
 const TARGET_DAY_OFFSET = 4;
 const RUN_AFTER_MINUTE = 16 * 60 + 30;
 const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -49,26 +47,6 @@ function loadCasts(file = CASTS_FILE) {
     throw new Error("bg-monitor2-casts.json に重複したキャスト名があります");
   }
   return names;
-}
-
-function loadOneShotConfig(file = ONE_SHOT_FILE) {
-  let config;
-  try {
-    config = JSON.parse(fsSync.readFileSync(file, "utf8"));
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw new Error(`BG2一回限り設定を読み込めません: ${error.message}`);
-  }
-  const keys = ["id", "runDate", "targetDate", "cast"];
-  if (!config || typeof config !== "object" || Array.isArray(config) ||
-      Object.keys(config).sort().join(",") !== keys.sort().join(",") ||
-      typeof config.id !== "string" || !/^[a-z0-9-]{8,80}$/.test(config.id) ||
-      !/^\d{4}\/\d{2}\/\d{2}$/.test(config.runDate) ||
-      !/^\d{4}\/\d{2}\/\d{2}$/.test(config.targetDate) ||
-      typeof config.cast !== "string" || !config.cast.trim()) {
-    throw new Error("BG2一回限り設定の形式が不正です");
-  }
-  return { ...config, cast: config.cast.trim() };
 }
 
 function normalizeText(value) {
@@ -152,60 +130,6 @@ async function writeState(file, state) {
   }
 }
 
-async function runOneShotTest({ config, pages, runDateKey, epochMillis, castsFile, stateFile, notifyFn, logger }) {
-  if (!config) return { status: "not-configured" };
-  if (config.runDate.replaceAll("/", "-") !== runDateKey) {
-    logger.log?.(`BG2 one-shot ignored: run date does not match (${runDateKey})`);
-    return { status: "expired" };
-  }
-  const originalCasts = loadCasts(castsFile);
-  if (!originalCasts.includes(config.cast)) throw new Error("一回限り対象がBG2キャスト設定にありません");
-  const previous = await readState(stateFile);
-  if (previous.id === config.id) return { status: "already-attempted" };
-  if (!Array.isArray(pages) || pages.length !== 8) throw new Error("BGから8ページ分の認証済みHTMLが渡されていません");
-  validateBgPages(pages);
-
-  const [year, month, day] = config.targetDate.split("/").map(Number);
-  const targetDate = new Date(Date.UTC(year, month - 1, day));
-  if (formatDate(targetDate) !== config.targetDate) throw new Error("一回限り対象日の形式が不正です");
-  const expectedTargetDate = targetDateAt(epochMillis);
-  if (formatDate(targetDate) !== formatDate(expectedTargetDate)) throw new Error("一回限り対象日が本日の4日後ではありません");
-  const targetUrl = scheduleUrl(targetDate);
-  const page = pages.find(item => item && item.url === targetUrl && typeof item.html === "string");
-  if (!page) throw new Error(`BG共有HTMLにテスト対象日ページがありません: ${targetUrl}`);
-
-  // Test mode intentionally evaluates only the one explicitly configured cast.
-  const entry = parseScheduleHtml(page.html, [config.cast]).get(config.cast);
-  if (!entry) {
-    logger.log?.(`BG2 one-shot waiting: ${config.cast} not scheduled on ${config.targetDate}`);
-    return { status: "not-eligible", cast: config.cast, targetDate: config.targetDate };
-  }
-  if (!entry.shift) {
-    logger.log?.(`BG2 one-shot waiting: ${config.cast} has no published shift`);
-    return { status: "not-eligible", cast: config.cast, targetDate: config.targetDate };
-  }
-  if (entry.soldOut) {
-    logger.log?.(`BG2 one-shot skipped: ${config.cast} is SOLD OUT`);
-    return { status: "sold-out", cast: config.cast, targetDate: config.targetDate };
-  }
-
-  // Claim before the external call. A retry after an ambiguous LINE response
-  // must not create a second test notification.
-  const attempt = { id: config.id, status: "attempted", attemptedAt: getJSTTime(), targetDate: config.targetDate, cast: config.cast, shift: entry.shift };
-  await writeState(stateFile, attempt);
-  try {
-    await notifyFn(buildMessage(targetDate, [{ name: config.cast, shift: entry.shift }]));
-    const sentAt = getJSTTime();
-    await writeState(stateFile, { ...attempt, status: "sent", sentAt });
-    logger.log?.(`BG2 one-shot LINE accepted cast=${config.cast} shift=${entry.shift} target=${config.targetDate} sentAt=${sentAt}`);
-    return { status: "sent", cast: config.cast, shift: entry.shift, targetDate: config.targetDate, sentAt };
-  } catch (error) {
-    await writeState(stateFile, { ...attempt, status: "failed", failedAt: getJSTTime(), error: error?.message || String(error) });
-    logger.error?.(`BG2 one-shot LINE failed cast=${config.cast} target=${config.targetDate}: ${error?.message || error}`);
-    throw error;
-  }
-}
-
 function getJstMinute(epochMillis) {
   const jst = new Date(epochMillis + JST_OFFSET_MS);
   return jst.getUTCHours() * 60 + jst.getUTCMinutes();
@@ -215,7 +139,7 @@ function jstDateKey(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
-async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, stateFile = STATE_FILE, oneShotFile = ONE_SHOT_FILE, oneShotStateFile = ONE_SHOT_STATE_FILE, notifyFn = notify, logger = console } = {}) {
+async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, stateFile = STATE_FILE, notifyFn = notify, logger = console } = {}) {
   const epochMillis = now instanceof Date ? now.getTime() : Number(now);
   if (!Number.isFinite(epochMillis)) throw new TypeError("now は有効な日時である必要があります");
   const runDate = jstDateAt(epochMillis);
@@ -224,12 +148,6 @@ async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, 
   if (runningDate === runDateKey) return { status: "busy", runDate: runDateKey };
   runningDate = runDateKey;
   try {
-    const oneShot = await runOneShotTest({
-      config: loadOneShotConfig(oneShotFile), pages, runDateKey, epochMillis, castsFile,
-      stateFile: oneShotStateFile, notifyFn, logger
-    });
-    if (oneShot.status !== "not-configured") return oneShot;
-
     const state = await readState(stateFile);
     if (state.checkedJstDate === runDateKey) return { status: "already-checked", runDate: runDateKey };
 
@@ -273,7 +191,6 @@ module.exports = {
   targetDateAt,
   scheduleUrl,
   loadCasts,
-  loadOneShotConfig,
   containsExactCastName,
   isSoldOut,
   parseScheduleHtml,
