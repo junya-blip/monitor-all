@@ -88,18 +88,28 @@ function installBgIngest(app, monitor, secondaryMonitor) {
       console.error(`BG INGEST primary monitor failed: ${error.code || "ERROR"}`);
     }
 
+    let secondaryError;
     if (secondaryMonitor) {
       try {
         await secondaryMonitor({ signal: controller.signal, pages });
       } catch (error) {
+        if (error?.stateStoreError || String(error?.code || "").startsWith("STATE_STORE_")) secondaryError = error;
         // BG2 owns independent state and retry rules; do not change BG's result.
-        console.error(`BG2 INGEST failed: ${error.message || error}`);
+        console.error(`BG2 INGEST failed (${error?.code || "ERROR"})`);
       }
+    }
+
+    if (secondaryError) {
+      if (res.destroyed) return;
+      console.error("BG2 INGEST failed HTTP 503");
+      return res.sendStatus(503);
     }
 
     if (primaryError) {
       if (res.destroyed) return;
-      const status = { BG_BUSY: 409, BG_UPSTREAM: 502, BG_DEADLINE: 504 }[primaryError.code] || 500;
+      const status = primaryError.stateStoreError || String(primaryError.code || "").startsWith("STATE_STORE_")
+        ? 503
+        : ({ BG_BUSY: 409, BG_UPSTREAM: 502, BG_DEADLINE: 504 }[primaryError.code] || 500);
       console.error(`BG INGEST failed HTTP ${status}`);
       return res.sendStatus(status);
     }

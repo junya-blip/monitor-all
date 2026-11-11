@@ -1,7 +1,7 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
-const fs = require("fs");
 const path = require("path");
+const { readState, writeState } = require("./common/state-store");
 
 const {
   notify
@@ -93,57 +93,51 @@ async function getLatestPost() {
 /* ===============================
    last.json 読み込み
 =============================== */
-function loadLast() {
+async function loadLast() {
   const file = path.join(
     __dirname,
     "data",
     "yuuri-last.json"
   );
 
+  const stored = await readState("yuuri-last.json", file);
+  if (!stored.initialized) return { data: { title: null, link: null, lastNoticeTime: null }, initialized: false };
   try {
-    const raw = fs.readFileSync(
-      file,
-      "utf-8"
-    );
-
-    const data =
-      JSON.parse(raw);
+    const data = stored.data;
+    if (!data || typeof data !== "object" || Array.isArray(data) ||
+        !(data.title === null || typeof data.title === "string") ||
+        !(data.link === null || typeof data.link === "string") ||
+        !(data.lastNoticeTime === null || typeof data.lastNoticeTime === "string")) {
+      throw new Error("state schema is invalid");
+    }
 
     return {
-      title:
-        data.title || null,
-      link:
-        data.link || null,
-      lastNoticeTime:
-        data.lastNoticeTime || null
+      data: {
+        title: data.title || null,
+        link: data.link || null,
+        lastNoticeTime: data.lastNoticeTime || null
+      },
+      initialized: true
     };
-  } catch {
-    return {
-      title: null,
-      link: null,
-      lastNoticeTime: null
-    };
+  } catch (error) {
+    const invalid = new Error("yuuri state schema is invalid", { cause: error });
+    invalid.code = "STATE_STORE_CORRUPT";
+    invalid.stateStoreError = true;
+    throw invalid;
   }
 }
 
 /* ===============================
    last.json 保存
 =============================== */
-function saveLast(data) {
+async function saveLast(data, initialize = false) {
   const file = path.join(
     __dirname,
     "data",
     "yuuri-last.json"
   );
 
-  fs.writeFileSync(
-    file,
-    JSON.stringify(
-      data,
-      null,
-      2
-    )
-  );
+  await writeState("yuuri-last.json", file, data, { initialize });
 }
 
 /* ===============================
@@ -213,6 +207,9 @@ async function runYuuriMonitor() {
     getJSTTime()
   );
 
+  const stored = await loadLast();
+  const last = stored.data;
+
   const latest =
     await getLatestPost();
 
@@ -229,8 +226,12 @@ async function runYuuriMonitor() {
     return;
   }
 
-  const last =
-    loadLast();
+  if (!stored.initialized) {
+    console.log("R2初回基準登録 → 通知せず保存");
+    await saveLast({ ...latest, lastNoticeTime: last.lastNoticeTime }, true);
+    console.log("yuuri-monitor 完了:", getJSTTime());
+    return;
+  }
 
   if (
     isDifferent(
@@ -257,7 +258,7 @@ async function runYuuriMonitor() {
      */
     await notify(message);
 
-    saveLast({
+    await saveLast({
       title: latest.title,
       link: latest.link,
       lastNoticeTime:

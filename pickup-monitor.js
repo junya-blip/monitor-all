@@ -1,7 +1,7 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
-const fs = require("fs");
 const path = require("path");
+const { readState, writeState } = require("./common/state-store");
 
 const {
   notify
@@ -287,14 +287,35 @@ async function fetchNextPickup() {
 /* ===============================
    last.json 読み込み
 =============================== */
-function loadLast(saveFile) {
+async function loadLast(saveFile) {
+  const stored = await readState("pickup-last.json", saveFile);
+  if (!stored.initialized) {
+    return {
+      current: { period: "", names: [] },
+      next: { period: "", names: [] },
+      lastNoticeTime: null,
+      legacy: false,
+      initialized: false
+    };
+  }
   try {
-    const raw = JSON.parse(
-      fs.readFileSync(
-        saveFile,
-        "utf8"
-      )
-    );
+    const raw = stored.data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("state must be an object");
+
+    const validSection = section => section && typeof section === "object" &&
+      typeof section.period === "string" && Array.isArray(section.names) &&
+      section.names.every(name => typeof name === "string");
+    if ((raw.current || raw.next) &&
+        (!validSection(raw.current) || !validSection(raw.next) ||
+          !(raw.lastNoticeTime === null || typeof raw.lastNoticeTime === "string"))) {
+      throw new Error("current/next state schema is invalid");
+    }
+    if (!raw.current && !raw.next &&
+        (typeof raw.period !== "string" || !Array.isArray(raw.names) ||
+          !raw.names.every(name => typeof name === "string") ||
+          !(raw.lastNoticeTime === undefined || raw.lastNoticeTime === null || typeof raw.lastNoticeTime === "string"))) {
+      throw new Error("legacy state schema is invalid");
+    }
 
     /*
      * 新形式
@@ -323,7 +344,8 @@ function loadLast(saveFile) {
         },
         lastNoticeTime:
           raw.lastNoticeTime || null,
-        legacy: false
+        legacy: false,
+        initialized: true
       };
     }
 
@@ -344,32 +366,26 @@ function loadLast(saveFile) {
       },
       lastNoticeTime:
         raw.lastNoticeTime || null,
-      legacy: true
+      legacy: true,
+      initialized: true
     };
-  } catch {
-    return {
-      current: {
-        period: "",
-        names: []
-      },
-      next: {
-        period: "",
-        names: []
-      },
-      lastNoticeTime: null,
-      legacy: false
-    };
+  } catch (error) {
+    const invalid = new Error("pickup state schema is invalid", { cause: error });
+    invalid.code = "STATE_STORE_CORRUPT";
+    invalid.stateStoreError = true;
+    throw invalid;
   }
 }
 
 /* ===============================
    last.json 保存
 =============================== */
-function saveLast(
+async function saveLast(
   saveFile,
   current,
   next,
-  lastNoticeTime
+  lastNoticeTime,
+  initialize = false
 ) {
   const data = {
     current,
@@ -377,14 +393,7 @@ function saveLast(
     lastNoticeTime
   };
 
-  fs.writeFileSync(
-    saveFile,
-    JSON.stringify(
-      data,
-      null,
-      2
-    )
-  );
+  await writeState("pickup-last.json", saveFile, data, { initialize });
 }
 
 /* ===============================
@@ -454,7 +463,7 @@ async function runPickupMonitor() {
     "pickup-last.json"
   );
 
-  const last = loadLast(saveFile);
+  const last = await loadLast(saveFile);
 
   let current =
     await fetchCurrentPickup();
@@ -478,6 +487,10 @@ async function runPickupMonitor() {
 
   const fetchedNext =
     await fetchNextPickup();
+
+  if (!last.initialized && fetchedNext === null) {
+    throw new Error("pickup initial state requires both current and next page results");
+  }
 
   let next =
     fetchedNext === null
@@ -555,6 +568,13 @@ async function runPickupMonitor() {
     next
   };
 
+  if (!last.initialized) {
+    console.log("R2初回基準登録 → 通知せず保存");
+    await saveLast(saveFile, current, next, last.lastNoticeTime, true);
+    console.log("pickup-monitor 完了:", getJSTTime());
+    return;
+  }
+
   const isFirstRun =
     last.current.names.length === 0 &&
     last.next.names.length === 0;
@@ -564,7 +584,7 @@ async function runPickupMonitor() {
       "初回実行 → 通知せず保存"
     );
 
-    saveLast(
+    await saveLast(
       saveFile,
       current,
       next,
@@ -610,7 +630,7 @@ async function runPickupMonitor() {
       "旧形式から新形式へ通知なしで移行"
     );
 
-    saveLast(
+    await saveLast(
       saveFile,
       current,
       next,
@@ -648,7 +668,7 @@ async function runPickupMonitor() {
      */
     await notify(message);
 
-    saveLast(
+    await saveLast(
       saveFile,
       current,
       next,
@@ -659,7 +679,7 @@ async function runPickupMonitor() {
       "変更なし → 通知なし"
     );
 
-    saveLast(
+    await saveLast(
       saveFile,
       current,
       next,

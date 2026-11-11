@@ -1,6 +1,7 @@
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { readState, writeState, getStateStore } = require("./common/state-store");
 const { fetchBgPages, validateBgPages } = require("./common/bg-source");
 
 const {
@@ -443,11 +444,53 @@ async function monitor(signal, deadline, suppliedPages) {
   const allHits = uniqueHits(pages.flatMap(({ url, html }) => parsePage(url, html, suppliedPages !== undefined)));
   signal.throwIfAborted();
 
-  const lastHits =
-    loadLast();
+  const store = getStateStore();
+  const localMode = store.mode === "local";
+  const localStateFile = path.join(__dirname, "data", "bg-state.json");
+  const stored = localMode
+    ? null
+    : await readState("bg-monitor.json", localStateFile);
+  const stateInitialized = localMode || stored.initialized;
+  const stateData = localMode
+    ? null
+    : (stored.data || {});
+  if (!localMode && (!stateData || typeof stateData !== "object" || Array.isArray(stateData) ||
+      (stored.initialized && (!Array.isArray(stateData.hits) || !stateData.hits.every(hit => hit && typeof hit === "object" &&
+        ["title", "keyword", "shift", "date", "url"].every(field => typeof hit[field] === "string")) ||
+        !Array.isArray(stateData.notices) || !stateData.notices.every(item => typeof item === "string") || typeof stateData.lastNoticeTime !== "string")))) {
+    const error = new Error("BG state schema is invalid");
+    error.code = "STATE_STORE_CORRUPT";
+    error.stateStoreError = true;
+    throw error;
+  }
+  const lastHits = localMode
+    ? loadLast()
+    : (Array.isArray(stateData.hits) ? stateData.hits : []);
+  const lastNotice = localMode
+    ? loadLastNotice()
+    : {
+        notices: Array.isArray(stateData.notices) ? stateData.notices : [],
+        lastNoticeTime: stateData.lastNoticeTime || "-"
+      };
 
-  const lastNotice =
-    loadLastNotice();
+  const persist = async (hits, noticeState, initialize = false) => {
+    if (localMode) {
+      saveLast(hits);
+      saveLastNotice(noticeState.notices, noticeState.lastNoticeTime);
+      return;
+    }
+    await writeState("bg-monitor.json", localStateFile, {
+      hits,
+      notices: noticeState.notices,
+      lastNoticeTime: noticeState.lastNoticeTime
+    }, { initialize });
+  };
+
+  if (!stateInitialized) {
+    console.log("R2初回基準登録 → 通知せず保存");
+    await persist(allHits, { notices: [], lastNoticeTime: "-" }, true);
+    return;
+  }
 
   const lastKeys = new Set(
     lastHits.map(
@@ -475,14 +518,14 @@ async function monitor(signal, deadline, suppliedPages) {
      * 現在サイトに残っているヒットだけ保存。
      * 掲載終了した古いデータは消える。
      */
-    saveLast(allHits);
-
     if (allHits.length === 0) {
       console.log(
         "ヒットなし → ダッシュボードをクリア"
       );
 
-      clearLastNotice();
+      await persist(allHits, { notices: [], lastNoticeTime: getJSTTime() });
+    } else {
+      await persist(allHits, lastNotice);
     }
 
     return;
@@ -495,8 +538,11 @@ async function monitor(signal, deadline, suppliedPages) {
   const notifiedNoticeList = [];
   const notifiedHits = [];
 
-  function saveNotices() {
-    saveLastNotice([...lastNotice.notices, ...notifiedNoticeList]);
+  async function saveNotices(hits = lastHits) {
+    await persist(hits, {
+      notices: [...lastNotice.notices, ...notifiedNoticeList],
+      lastNoticeTime: getJSTTime()
+    });
   }
 
   for (const hit of diff) {
@@ -549,8 +595,7 @@ async function monitor(signal, deadline, suppliedPages) {
       await notify(noticeText, { signal: deadline });
     } catch (err) {
       if (notifiedHits.length > 0) {
-        saveLast(uniqueHits([...lastHits, ...notifiedHits]));
-        saveNotices();
+        await saveNotices(uniqueHits([...lastHits, ...notifiedHits]));
       }
       throw err;
     }
@@ -567,8 +612,6 @@ async function monitor(signal, deadline, suppliedPages) {
    * これを保存しないと、キャストフィルター対象外の
    * ヒットが5分ごとに新規差分として検出され続ける。
    */
-  saveLast(allHits);
-
   /*
    * 実際に通知した内容だけを
    * ダッシュボード履歴へ追加する。
@@ -576,8 +619,9 @@ async function monitor(signal, deadline, suppliedPages) {
   if (
     notifiedNoticeList.length > 0
   ) {
-    saveNotices();
+    await saveNotices(allHits);
   } else {
+    await persist(allHits, lastNotice);
     console.log(
       "差分はあったが通知対象はなし"
     );

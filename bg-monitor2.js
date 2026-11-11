@@ -6,6 +6,11 @@ const cheerio = require("cheerio");
 const { JST_OFFSET_MS, getJSTTime } = require("./common/time");
 const { notify } = require("./common/notifier");
 const { validateBgPages } = require("./common/bg-source");
+const {
+  getStateStore,
+  readState: readStoredState,
+  writeState: writeStoredState
+} = require("./common/state-store");
 
 const ROOT = __dirname;
 const CASTS_FILE = path.join(ROOT, "bg-monitor2-casts.json");
@@ -144,11 +149,52 @@ async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, 
   if (!Number.isFinite(epochMillis)) throw new TypeError("now は有効な日時である必要があります");
   const runDate = jstDateAt(epochMillis);
   const runDateKey = jstDateKey(runDate);
-  if (getJstMinute(epochMillis) < RUN_AFTER_MINUTE) return { status: "before-window", runDate: runDateKey };
   if (runningDate === runDateKey) return { status: "busy", runDate: runDateKey };
   runningDate = runDateKey;
   try {
-    const state = await readState(stateFile);
+    const stored = await readStoredState("bg-monitor2-last.json", stateFile);
+    const state = stored.initialized ? stored.data : {};
+    const isR2 = getStateStore().mode === "r2";
+    const stateInitialized = stored.initialized || !isR2;
+    if (stored.initialized && (!state || typeof state !== "object" || Array.isArray(state) ||
+        typeof state.checkedAt !== "string" || typeof state.targetDate !== "string" ||
+        !Array.isArray(state.notificationCasts) || !state.notificationCasts.every(item => item && typeof item.name === "string" && typeof item.shift === "string") || typeof state.lastNotifiedAt !== "string" ||
+        (state.checkedJstDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(state.checkedJstDate)))) {
+      const error = new Error("BG2 state schema is invalid");
+      error.code = "STATE_STORE_CORRUPT";
+      error.stateStoreError = true;
+      throw error;
+    }
+    const beforeWindow = getJstMinute(epochMillis) < RUN_AFTER_MINUTE;
+
+    // Establish a silent comparison baseline before today's notification
+    // window when the first post-migration cron already has validated pages.
+    // Do not mark the daily check complete; the scheduled 16:30 run still
+    // sends its normal combined notification.
+    if (beforeWindow) {
+      if (!stateInitialized && isR2 && Array.isArray(pages) && pages.length === 8) {
+        validateBgPages(pages);
+        const targetDate = targetDateAt(epochMillis);
+        const targetUrl = scheduleUrl(targetDate);
+        const page = pages.find(item => item && item.url === targetUrl && typeof item.html === "string");
+        if (!page) throw new Error(`BG共有HTMLに対象日ページがありません: ${targetUrl}`);
+        const names = loadCasts(castsFile);
+        const schedule = parseScheduleHtml(page.html, names);
+        const eligible = names.flatMap(name => {
+          const entry = schedule.get(name);
+          if (!entry || !entry.shift || entry.soldOut) return [];
+          return [{ name, shift: entry.shift }];
+        });
+        await writeStoredState("bg-monitor2-last.json", stateFile, {
+          checkedAt: "-",
+          targetDate: formatDate(targetDate),
+          notificationCasts: [],
+          lastNotifiedAt: "-"
+        }, { initialize: true });
+        logger.log?.(`BG2 R2 baseline saved before notification window target=${formatDate(targetDate)} eligible=${eligible.length}; no LINE sent`);
+      }
+      return { status: "before-window", runDate: runDateKey };
+    }
     if (state.checkedJstDate === runDateKey) return { status: "already-checked", runDate: runDateKey };
 
     if (!Array.isArray(pages) || pages.length !== 8) throw new Error("BGから8ページ分の認証済みHTMLが渡されていません");
@@ -167,6 +213,18 @@ async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, 
     });
     const checkedAt = getJSTTime();
     let notifiedAt = state.lastNotifiedAt || "-";
+    if (!stateInitialized) {
+      const nextState = {
+        checkedJstDate: runDateKey,
+        checkedAt,
+        targetDate: formatDate(targetDate),
+        notificationCasts: [],
+        lastNotifiedAt: state.lastNotifiedAt || "-"
+      };
+      await writeStoredState("bg-monitor2-last.json", stateFile, nextState, { initialize: true });
+      logger.log?.(`BG2 R2 first baseline ${runDateKey}; no LINE sent`);
+      return { status: "initialized", runDate: runDateKey, targetDate: formatDate(targetDate), entries: eligible, checkedAt, notifiedAt: "-" };
+    }
     if (eligible.length) {
       await notifyFn(buildMessage(targetDate, eligible));
       notifiedAt = getJSTTime();
@@ -178,7 +236,7 @@ async function runBgMonitor2({ pages, now = Date.now(), castsFile = CASTS_FILE, 
       notificationCasts: eligible,
       lastNotifiedAt: eligible.length ? notifiedAt : state.lastNotifiedAt || "-"
     };
-    await writeState(stateFile, nextState);
+    await writeStoredState("bg-monitor2-last.json", stateFile, nextState);
     logger.log?.(`BG2 checked ${runDateKey} target=${formatDate(targetDate)} eligible=${eligible.length} notified=${eligible.length > 0}`);
     return { status: "checked", runDate: runDateKey, targetDate: formatDate(targetDate), entries: eligible, checkedAt, notifiedAt: eligible.length ? notifiedAt : "-" };
   } finally {

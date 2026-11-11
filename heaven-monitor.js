@@ -2,6 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
+const { readState, writeState, heavenStateKey } = require("./common/state-store");
 
 const {
   notify
@@ -440,14 +441,20 @@ async function fetchSchedule(url) {
 /* ===============================
    保存データ読み込み
 =============================== */
-function loadCastData(saveFile) {
+async function loadCastData(castName, saveFile) {
+  const stored = await readState(heavenStateKey(castName), saveFile);
+  if (!stored.initialized) return { schedule: [], noSchedule: false, lastNoticeTime: null, initialized: false };
   try {
-    const raw = JSON.parse(
-      fs.readFileSync(
-        saveFile,
-        "utf8"
-      )
-    );
+    const raw = stored.data;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+        !Array.isArray(raw.schedule) || typeof raw.noSchedule !== "boolean" ||
+        !raw.schedule.every(item => item && typeof item === "object" && typeof item.date === "string" && typeof item.time === "string") ||
+        !(raw.lastNoticeTime === null || typeof raw.lastNoticeTime === "string")) {
+      const error = new Error(`heaven state schema is invalid: ${castName}`);
+      error.code = "STATE_STORE_CORRUPT";
+      error.stateStoreError = true;
+      throw error;
+    }
 
     return {
       schedule:
@@ -457,32 +464,28 @@ function loadCastData(saveFile) {
       noSchedule:
         raw.noSchedule || false,
       lastNoticeTime:
-        raw.lastNoticeTime || null
+        raw.lastNoticeTime || null,
+      initialized: true
     };
-  } catch {
-    return {
-      schedule: [],
-      noSchedule: false,
-      lastNoticeTime: null
-    };
+  } catch (error) {
+    if (error.stateStoreError) throw error;
+    const invalid = new Error(`heaven state schema is invalid: ${castName}`, { cause: error });
+    invalid.code = "STATE_STORE_CORRUPT";
+    invalid.stateStoreError = true;
+    throw invalid;
   }
 }
 
 /* ===============================
    保存データ書き込み
 =============================== */
-function saveCastData(
+async function saveCastData(
+  castName,
   saveFile,
-  data
+  data,
+  initialize = false
 ) {
-  fs.writeFileSync(
-    saveFile,
-    JSON.stringify(
-      data,
-      null,
-      2
-    )
-  );
+  await writeState(heavenStateKey(castName), saveFile, data, { initialize });
 }
 
 /* ===============================
@@ -492,6 +495,15 @@ async function checkCast(cast) {
   console.log(
     `チェック中: ${cast.name}`
   );
+
+  const saveFile = path.join(
+    __dirname,
+    "data",
+    `heaven-last-${cast.name}.json`
+  );
+
+  const previous =
+    await loadCastData(cast.name, saveFile);
 
   const newSchedule =
     await fetchSchedule(
@@ -511,15 +523,6 @@ async function checkCast(cast) {
     return;
   }
 
-  const saveFile = path.join(
-    __dirname,
-    "data",
-    `heaven-last-${cast.name}.json`
-  );
-
-  const previous =
-    loadCastData(saveFile);
-
   const oldSchedule =
     previous.schedule;
 
@@ -534,6 +537,27 @@ async function checkCast(cast) {
       s =>
         normalizeTime(s.time) === "-"
     );
+
+  if (!previous.initialized) {
+    let baseline;
+    if (allDash) {
+      baseline = { schedule: [], noSchedule: true, lastNoticeTime: previous.lastNoticeTime };
+    } else {
+      const lastIndex = getLastWorkingIndex(newSchedule);
+      const newRange = lastIndex >= 0 ? newSchedule.slice(0, lastIndex + 1) : [];
+      baseline = {
+        schedule: filterFuture(newRange).map(s => ({
+          date: normalizeDisplayDate(s.date),
+          time: normalizeTime(s.time)
+        })),
+        noSchedule: false,
+        lastNoticeTime: previous.lastNoticeTime
+      };
+    }
+    console.log(`R2初回基準登録 → 通知せず保存: ${cast.name}`);
+    await saveCastData(cast.name, saveFile, baseline, true);
+    return;
+  }
 
   const oldAllDash =
     oldNoSchedule ||
@@ -573,7 +597,8 @@ async function checkCast(cast) {
      */
     await notify(message);
 
-    saveCastData(
+    await saveCastData(
+      cast.name,
       saveFile,
       {
         schedule: [],
@@ -638,7 +663,8 @@ async function checkCast(cast) {
           normalizeTime(s.time)
       }));
 
-    saveCastData(
+    await saveCastData(
+      cast.name,
       saveFile,
       {
         schedule:
@@ -689,7 +715,8 @@ async function checkCast(cast) {
   /*
    * 通知成功後に保存する。
    */
-  saveCastData(
+  await saveCastData(
+    cast.name,
     saveFile,
     {
       schedule:
@@ -718,6 +745,7 @@ async function runHeavenMonitor() {
     try {
       await checkCast(cast);
     } catch (err) {
+      if (err.stateStoreError || err.code?.startsWith("STATE_STORE_")) throw err;
       console.error(
         `heaven-monitor エラー（${cast.name}）:`,
         err.response?.data ||
