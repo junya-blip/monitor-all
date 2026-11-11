@@ -325,7 +325,12 @@ class R2StateStore {
 
 function createStateStore({ env = process.env, client, logger = console } = {}) {
   const configured = REQUIRED_ENV.filter(name => typeof env[name] === "string" && env[name].length > 0);
-  if (!configured.length) return new LocalStateStore();
+  if (!configured.length) {
+    if (String(env.RENDER || "").toLowerCase() === "true" || env.RENDER_SERVICE_TYPE === "web") {
+      throw new StateStoreError("STATE_STORE_CONFIG", "R2 must be configured on the production Web Service");
+    }
+    return new LocalStateStore();
+  }
   if (configured.length !== REQUIRED_ENV.length) {
     throw new StateStoreError("STATE_STORE_CONFIG", `R2 configuration is incomplete (${configured.length}/${REQUIRED_ENV.length} values present)`);
   }

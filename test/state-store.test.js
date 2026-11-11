@@ -87,6 +87,7 @@ test("incomplete initialization retries silently; ready keys cannot be reinitial
 test("R2 authentication errors fail closed and environment config must be complete and HTTPS", async () => {
   const client = { async send() { const error = new Error("denied"); error.name = "AccessDenied"; throw error; } };
   await assert.rejects(store(client).read("bg-monitor.json"), error => error.code === "STATE_STORE_AUTH");
+  assert.throws(() => createStateStore({ env: { RENDER_SERVICE_TYPE: "web" } }), error => error.code === "STATE_STORE_CONFIG");
   assert.throws(() => createStateStore({ env: { R2_BUCKET: "b" } }), error => error.code === "STATE_STORE_CONFIG");
   assert.throws(() => createStateStore({ env: {
     R2_ENDPOINT: "http://r2.invalid", R2_BUCKET: "b", R2_ACCESS_KEY_ID: "a", R2_SECRET_ACCESS_KEY: "s"
